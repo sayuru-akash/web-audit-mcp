@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
-import { RunAuditButton, ScheduleForm } from "@/components/forms";
+import { DeleteWebsiteForm, EditWebsiteForm, RunAuditButton, ScheduleForm } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { findingsFor, getUserDashboard, latestAuditFor } from "@/lib/store";
@@ -42,6 +42,7 @@ export default async function WebsiteDetailPage({ params }: { params: Promise<{ 
           <div className="big" style={{ fontSize: 24 }}>
             {website.scheduleEnabled ? website.scheduleFrequency : "Manual"}
           </div>
+          <p className="muted">Next run: {website.nextScheduledRunAt ? timeAgo(website.nextScheduledRunAt) : "Not scheduled"}</p>
         </div>
       </div>
       <div style={{ height: 18 }} />
@@ -66,7 +67,11 @@ export default async function WebsiteDetailPage({ params }: { params: Promise<{ 
             </tbody>
           </table>
         </div>
-        <ScheduleForm websiteId={website.id} frequency={website.scheduleFrequency} threshold={website.alertThreshold} />
+        <div className="grid">
+          <ScheduleForm websiteId={website.id} frequency={website.scheduleFrequency} threshold={website.alertThreshold} />
+          <EditWebsiteForm websiteId={website.id} displayName={website.displayName} />
+          <DeleteWebsiteForm websiteId={website.id} />
+        </div>
       </div>
     </AppShell>
   );

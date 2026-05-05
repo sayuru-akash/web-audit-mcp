@@ -35,7 +35,20 @@ export async function addWebsiteForUser(userId: string, url: string, displayName
   });
 }
 
-export async function runAuditForWebsite(userId: string, websiteId: string): Promise<AuditRun> {
+function nextRunAt(frequency: ScheduleFrequency, from = new Date()): string | undefined {
+  if (frequency === "manual") return undefined;
+  const date = new Date(from);
+  if (frequency === "daily") date.setDate(date.getDate() + 1);
+  if (frequency === "weekly") date.setDate(date.getDate() + 7);
+  if (frequency === "monthly") date.setMonth(date.getMonth() + 1);
+  return date.toISOString();
+}
+
+export async function runAuditForWebsite(
+  userId: string,
+  websiteId: string,
+  source: "manual" | "scheduled" = "manual",
+): Promise<AuditRun> {
   const canRun = await checkRateLimit(`audit-user:${userId}`, 12, 60 * 60 * 1000);
   if (!canRun) throw new Error("Audit limit reached. Please try again later.");
   const audit = await updateStore((data) => {
@@ -60,10 +73,10 @@ export async function runAuditForWebsite(userId: string, websiteId: string): Pro
     return auditRun;
   });
   if (audit.status !== "queued") return audit;
-  return processAudit(audit.id);
+  return processAudit(audit.id, source);
 }
 
-export async function processAudit(auditId: string): Promise<AuditRun> {
+export async function processAudit(auditId: string, source: "manual" | "scheduled" = "manual"): Promise<AuditRun> {
   const startedAt = nowIso();
   await updateStore((data) => {
     const audit = data.audits.find((item) => item.id === auditId);
@@ -105,6 +118,10 @@ export async function processAudit(auditId: string): Promise<AuditRun> {
       data.metrics.push(...result.metrics.map((metric) => ({ ...metric, id: id(), auditRunId: auditId })));
       if (website) {
         website.lastAuditId = auditId;
+        if (source === "scheduled") {
+          website.lastScheduledRunAt = completedAt;
+          website.nextScheduledRunAt = nextRunAt(website.scheduleFrequency, new Date(completedAt));
+        }
         website.updatedAt = completedAt;
       }
       addNotification(data, {
@@ -115,6 +132,16 @@ export async function processAudit(auditId: string): Promise<AuditRun> {
         title: "Audit completed",
         message: `${website?.displayName ?? "Website"} scored ${result.overallScore}.`,
       });
+      if (source === "scheduled") {
+        addNotification(data, {
+          userId: current.userId,
+          websiteId: current.websiteId,
+          auditRunId: current.id,
+          type: "scheduled_completed",
+          title: "Scheduled audit completed",
+          message: `${website?.displayName ?? "Website"} finished its scheduled audit.`,
+        });
+      }
       if (data.findings.some((finding) => finding.auditRunId === auditId && finding.severity === "critical")) {
         addNotification(data, {
           userId: current.userId,
@@ -148,6 +175,11 @@ export async function processAudit(auditId: string): Promise<AuditRun> {
       current.failureReason = error instanceof Error ? error.message : "The audit failed unexpectedly.";
       current.completedAt = nowIso();
       current.updatedAt = current.completedAt;
+      const website = data.websites.find((site) => site.id === current.websiteId);
+      if (source === "scheduled" && website) {
+        website.lastScheduledRunAt = current.completedAt;
+        website.nextScheduledRunAt = nextRunAt(website.scheduleFrequency, new Date(current.completedAt));
+      }
       addNotification(data, {
         userId: current.userId,
         websiteId: current.websiteId,
@@ -161,6 +193,19 @@ export async function processAudit(auditId: string): Promise<AuditRun> {
   }
 }
 
+export async function processQueuedAudits(limit = 3): Promise<AuditRun[]> {
+  const data = await readStore();
+  const queued = data.audits
+    .filter((audit) => audit.status === "queued")
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .slice(0, Math.max(1, Math.min(10, limit)));
+  const processed: AuditRun[] = [];
+  for (const audit of queued) {
+    processed.push(await processAudit(audit.id));
+  }
+  return processed;
+}
+
 export async function updateSchedule(
   userId: string,
   websiteId: string,
@@ -172,9 +217,54 @@ export async function updateSchedule(
     if (!website) throw new Error("Website not found.");
     website.scheduleFrequency = frequency;
     website.scheduleEnabled = frequency !== "manual";
+    website.nextScheduledRunAt = nextRunAt(frequency);
+    if (frequency === "manual") {
+      website.lastScheduledRunAt = undefined;
+    }
     website.alertThreshold = Math.max(1, Math.min(50, alertThreshold));
     website.updatedAt = nowIso();
     return website;
+  });
+}
+
+export async function updateWebsiteDetails(userId: string, websiteId: string, displayName: string) {
+  return updateStore((data) => {
+    const website = data.websites.find((site) => site.id === websiteId && site.userId === userId);
+    if (!website) throw new Error("Website not found.");
+    const cleanName = displayName.trim();
+    if (cleanName.length < 2 || cleanName.length > 120) throw new Error("Website name must be 2 to 120 characters.");
+    website.displayName = cleanName;
+    website.updatedAt = nowIso();
+    return website;
+  });
+}
+
+export async function deleteWebsiteForUser(userId: string, websiteId: string) {
+  return updateStore((data) => {
+    const website = data.websites.find((site) => site.id === websiteId && site.userId === userId);
+    if (!website) throw new Error("Website not found.");
+    const auditIds = new Set(data.audits.filter((audit) => audit.websiteId === websiteId).map((audit) => audit.id));
+    data.shareLinks = data.shareLinks.filter((link) => !auditIds.has(link.auditRunId));
+    data.metrics = data.metrics.filter((metric) => !auditIds.has(metric.auditRunId));
+    data.findings = data.findings.filter((finding) => !auditIds.has(finding.auditRunId));
+    data.notifications = data.notifications.filter((notification) => notification.websiteId !== websiteId);
+    data.audits = data.audits.filter((audit) => audit.websiteId !== websiteId);
+    data.websites = data.websites.filter((site) => site.id !== websiteId);
+  });
+}
+
+export async function deleteAccountForUser(userId: string) {
+  return updateStore((data) => {
+    const websiteIds = new Set(data.websites.filter((website) => website.userId === userId).map((website) => website.id));
+    const auditIds = new Set(data.audits.filter((audit) => audit.userId === userId).map((audit) => audit.id));
+    data.shareLinks = data.shareLinks.filter((link) => !auditIds.has(link.auditRunId));
+    data.metrics = data.metrics.filter((metric) => !auditIds.has(metric.auditRunId));
+    data.findings = data.findings.filter((finding) => !auditIds.has(finding.auditRunId));
+    data.notifications = data.notifications.filter((notification) => notification.userId !== userId);
+    data.audits = data.audits.filter((audit) => audit.userId !== userId);
+    data.websites = data.websites.filter((website) => !websiteIds.has(website.id));
+    data.sessions = data.sessions.filter((session) => session.userId !== userId);
+    data.users = data.users.filter((user) => user.id !== userId);
   });
 }
 
@@ -195,9 +285,10 @@ export async function createOrToggleShare(userId: string, auditId: string, enabl
 
 export async function dueScheduledWebsites(): Promise<Website[]> {
   const data = await readStore();
-  const now = Date.now();
+  const currentTime = Date.now();
   return data.websites.filter((website) => {
     if (!website.scheduleEnabled || website.scheduleFrequency === "manual") return false;
+    if (website.nextScheduledRunAt) return Date.parse(website.nextScheduledRunAt) <= currentTime;
     const latest = data.audits
       .filter((audit) => audit.websiteId === website.id)
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
@@ -208,6 +299,6 @@ export async function dueScheduledWebsites(): Promise<Website[]> {
       monthly: 30 * 24 * 60 * 60 * 1000,
       manual: Infinity,
     }[website.scheduleFrequency];
-    return now - Date.parse(latest.createdAt) >= interval;
+    return currentTime - Date.parse(latest.createdAt) >= interval;
   });
 }

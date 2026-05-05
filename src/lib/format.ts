@@ -2,7 +2,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 
 export function timeAgo(iso?: string) {
   if (!iso) return "Not yet";
-  return `${formatDistanceToNowStrict(new Date(iso))} ago`;
+  return formatDistanceToNowStrict(new Date(iso), { addSuffix: true });
 }
 
 export function absoluteUrl(path: string) {

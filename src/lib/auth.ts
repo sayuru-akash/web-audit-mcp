@@ -18,6 +18,24 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Enter your password.").max(128),
 });
 
+export const resetRequestSchema = z.object({
+  email: z.string().trim().email("Enter a valid email.").max(254),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(24, "Enter the reset token."),
+  password: z.string().min(10, "Use at least 10 characters.").max(128),
+});
+
+export const profileSchema = z.object({
+  displayName: z.string().trim().min(2, "Name is too short.").max(80, "Name is too long."),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Enter your current password.").max(128),
+  password: z.string().min(10, "Use at least 10 characters.").max(128),
+});
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
@@ -35,6 +53,40 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+export async function createPasswordResetToken(email: string): Promise<string | undefined> {
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
+  await updateStore((data) => {
+    const user = data.users.find((item) => item.email === email);
+    if (!user) return;
+    const createdAt = nowIso();
+    data.passwordResetTokens.push({
+      id: id(),
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 30).toISOString(),
+      createdAt,
+    });
+  });
+  return process.env.WEB_AUDIT_DEV_RESET_TOKENS === "true" ? token : undefined;
+}
+
+export async function resetPasswordWithToken(token: string, password: string): Promise<void> {
+  const tokenHash = hashToken(token);
+  await updateStore((data) => {
+    const resetToken = data.passwordResetTokens.find(
+      (item) => item.tokenHash === tokenHash && !item.usedAt && Date.parse(item.expiresAt) > Date.now(),
+    );
+    if (!resetToken) throw new Error("Reset token is invalid or expired.");
+    const user = data.users.find((item) => item.id === resetToken.userId);
+    if (!user) throw new Error("Account not found.");
+    user.passwordHash = hashPassword(password);
+    user.updatedAt = nowIso();
+    resetToken.usedAt = nowIso();
+    data.sessions = data.sessions.filter((session) => session.userId !== user.id);
+  });
 }
 
 export async function createSession(userId: string): Promise<string> {
@@ -89,6 +141,22 @@ export async function requireUser(): Promise<User> {
   return user;
 }
 
+export async function requireAdmin(): Promise<User> {
+  const user = await requireUser();
+  const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length === 0 && process.env.NODE_ENV !== "development") {
+    throw new Error("Admin access is not configured.");
+  }
+  if (process.env.NODE_ENV === "development" && adminEmails.length === 0) return user;
+  if (!adminEmails.includes(user.email.toLowerCase())) {
+    throw new Error("You do not have access to this admin area.");
+  }
+  return user;
+}
+
 export async function optionalDemoUser(): Promise<User> {
   const user = await currentUser();
   if (user) return user;
@@ -101,6 +169,10 @@ export async function optionalDemoUser(): Promise<User> {
         email: "demo@webaudit.local",
         passwordHash: "demo",
         displayName: "Demo User",
+        notifyOnAuditCompleted: true,
+        notifyOnAuditFailed: true,
+        notifyOnCriticalIssue: true,
+        notifyOnScoreDrop: true,
         createdAt: ts,
         updatedAt: ts,
       };

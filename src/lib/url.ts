@@ -25,6 +25,8 @@ export type SafeUrl = {
   domain: string;
 };
 
+export const MAX_REDIRECTS = 5;
+
 export function normalizeWebsiteUrl(input: string): SafeUrl {
   const parsedInput = websiteUrlSchema.parse(input);
   const hasProtocol = /^[a-z][a-z0-9+.-]*:/i.test(parsedInput);
@@ -67,6 +69,11 @@ export async function assertPublicUrl(urlInput: string): Promise<SafeUrl> {
     throw new Error("This URL resolves to a private or internal network address, so it was blocked.");
   }
   return safe;
+}
+
+export async function safeRedirectTarget(currentUrl: string, location: string): Promise<SafeUrl> {
+  const resolved = new URL(location, currentUrl).toString();
+  return assertPublicUrl(resolved);
 }
 
 export function sameOriginInternalLinks(baseUrl: string, hrefs: string[], limit: number): string[] {

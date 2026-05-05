@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AuditRun, Finding, Metric, Notification, ShareLink, StoreData, User, Website } from "@/lib/types";
 
 const DATA_FILE = path.join(process.cwd(), "data", "webaudit.json");
+let storeQueue: Promise<unknown> = Promise.resolve();
 
 const emptyStore = (): StoreData => ({
   users: [],
@@ -14,6 +15,7 @@ const emptyStore = (): StoreData => ({
   metrics: [],
   notifications: [],
   shareLinks: [],
+  passwordResetTokens: [],
   rateLimits: [],
 });
 
@@ -38,10 +40,14 @@ export async function writeStore(data: StoreData): Promise<void> {
 }
 
 export async function updateStore<T>(mutator: (data: StoreData) => T | Promise<T>): Promise<T> {
-  const data = await readStore();
-  const result = await mutator(data);
-  await writeStore(data);
-  return result;
+  const operation = storeQueue.then(async () => {
+    const data = await readStore();
+    const result = await mutator(data);
+    await writeStore(data);
+    return result;
+  });
+  storeQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 export function publicUser(user: User) {
@@ -111,6 +117,17 @@ export function addNotification(
   data: StoreData,
   notification: Omit<Notification, "id" | "createdAt" | "read">,
 ): Notification {
+  const user = data.users.find((item) => item.id === notification.userId);
+  const enabled = {
+    audit_completed: user?.notifyOnAuditCompleted ?? true,
+    scheduled_completed: user?.notifyOnAuditCompleted ?? true,
+    audit_failed: user?.notifyOnAuditFailed ?? true,
+    critical_issue: user?.notifyOnCriticalIssue ?? true,
+    score_dropped: user?.notifyOnScoreDrop ?? true,
+  }[notification.type];
+  if (!enabled) {
+    return { ...notification, id: id(), read: true, createdAt: nowIso() };
+  }
   const created: Notification = { ...notification, id: id(), read: false, createdAt: nowIso() };
   data.notifications.push(created);
   return created;

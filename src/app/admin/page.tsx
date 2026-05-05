@@ -1,9 +1,9 @@
 import { AppShell } from "@/components/app-shell";
-import { requireUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { readStore } from "@/lib/store";
 
 export default async function AdminPage() {
-  const user = await requireUser();
+  const user = await requireAdmin();
   const data = await readStore();
   const failed = data.audits.filter((audit) => audit.status === "failed");
   const running = data.audits.filter((audit) => audit.status === "running" || audit.status === "queued");

@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import type { AuditCategory, Finding, Metric } from "@/lib/types";
 import { id } from "@/lib/store";
-import { assertPublicUrl, sameOriginInternalLinks } from "@/lib/url";
+import { assertPublicUrl, MAX_REDIRECTS, safeRedirectTarget, sameOriginInternalLinks } from "@/lib/url";
 import { overallScore, scoreAll, severityRank } from "@/lib/scoring";
 
 type AuditResult = {
@@ -21,6 +21,12 @@ type FetchedPage = {
   html: string;
   durationMs: number;
   bytes: number;
+  redirected: boolean;
+};
+
+type SafeFetchResult = {
+  response: Response;
+  finalUrl: string;
   redirected: boolean;
 };
 
@@ -58,13 +64,13 @@ function metric(category: AuditCategory, key: string, label: string, value: stri
   return { category, key, label, value, unit };
 }
 
-async function fetchWithTimeout(url: string, method: "GET" | "HEAD" = "GET"): Promise<Response> {
+async function fetchOnce(url: string, method: "GET" | "HEAD" = "GET"): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     return await fetch(url, {
       method,
-      redirect: "follow",
+      redirect: "manual",
       signal: controller.signal,
       headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
     });
@@ -73,9 +79,24 @@ async function fetchWithTimeout(url: string, method: "GET" | "HEAD" = "GET"): Pr
   }
 }
 
+async function safeFetch(url: string, method: "GET" | "HEAD" = "GET", redirects = 0): Promise<SafeFetchResult> {
+  const safe = await assertPublicUrl(url);
+  const response = await fetchOnce(safe.normalizedUrl, method);
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    const location = response.headers.get("location");
+    if (!location) throw new Error("The website returned a redirect without a Location header.");
+    if (redirects >= MAX_REDIRECTS) throw new Error(`The URL exceeded the ${MAX_REDIRECTS} redirect limit.`);
+    const target = await safeRedirectTarget(safe.normalizedUrl, location);
+    const nextMethod = response.status === 303 ? "GET" : method;
+    const next = await safeFetch(target.normalizedUrl, nextMethod, redirects + 1);
+    return { ...next, redirected: true };
+  }
+  return { response, finalUrl: safe.normalizedUrl, redirected: redirects > 0 };
+}
+
 async function fetchPage(url: string): Promise<FetchedPage> {
   const started = performance.now();
-  const response = await fetchWithTimeout(url);
+  const { response, finalUrl, redirected } = await safeFetch(url);
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html")) {
     throw new Error(`The URL returned ${contentType || "non-HTML content"}, not an HTML page.`);
@@ -85,19 +106,19 @@ async function fetchPage(url: string): Promise<FetchedPage> {
     throw new Error("The page HTML is larger than the v1 safety limit.");
   }
   return {
-    url: response.url,
+    url: finalUrl,
     status: response.status,
     headers: response.headers,
     html: buffer.toString("utf8"),
     durationMs: Math.round(performance.now() - started),
     bytes: buffer.byteLength,
-    redirected: response.redirected,
+    redirected,
   };
 }
 
 async function checkEndpoint(url: string): Promise<number | undefined> {
   try {
-    const response = await fetchWithTimeout(url, "HEAD");
+    const { response } = await safeFetch(url, "HEAD");
     return response.status;
   } catch {
     return undefined;

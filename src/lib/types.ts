@@ -10,6 +10,11 @@ export type User = {
   passwordHash: string;
   displayName: string;
   avatarUrl?: string;
+  defaultAuditFrequency?: ScheduleFrequency;
+  notifyOnAuditCompleted?: boolean;
+  notifyOnAuditFailed?: boolean;
+  notifyOnCriticalIssue?: boolean;
+  notifyOnScoreDrop?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -32,6 +37,8 @@ export type Website = {
   faviconUrl?: string;
   scheduleFrequency: ScheduleFrequency;
   scheduleEnabled: boolean;
+  lastScheduledRunAt?: string;
+  nextScheduledRunAt?: string;
   alertThreshold: number;
   lastAuditId?: string;
   createdAt: string;
@@ -105,6 +112,15 @@ export type ShareLink = {
   createdAt: string;
 };
 
+export type PasswordResetToken = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt: string;
+};
+
 export type StoreData = {
   users: User[];
   sessions: Session[];
@@ -114,5 +130,6 @@ export type StoreData = {
   metrics: Metric[];
   notifications: Notification[];
   shareLinks: ShareLink[];
+  passwordResetTokens: PasswordResetToken[];
   rateLimits: { key: string; count: number; resetAt: string }[];
 };

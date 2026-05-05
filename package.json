@@ -12,7 +12,8 @@
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "mcp": "tsx src/mcp/server.ts",
-    "audit:url": "tsx scripts/audit-url.ts"
+    "audit:url": "tsx scripts/audit-url.ts",
+    "worker:once": "tsx scripts/worker-once.ts"
   },
   "overrides": {
     "postcss": "^8.5.10"
