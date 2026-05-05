@@ -8,6 +8,7 @@ const scriptPolicy =
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: false,
+  poweredByHeader: false,
   async headers() {
     return [
       {

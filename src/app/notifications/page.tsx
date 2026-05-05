@@ -1,10 +1,17 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { MarkNotificationsReadForm } from "@/components/forms";
 import { paginate, Pagination } from "@/components/pagination";
 import { requireUser } from "@/lib/auth";
 import { getUserDashboard } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Notifications",
+  ...noIndexMetadata,
+};
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ page?: string; filter?: string }> }) {
   const query = await searchParams;

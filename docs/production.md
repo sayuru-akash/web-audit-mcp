@@ -103,6 +103,11 @@ UI routes:
 - `/terms`
 - `/robots.txt`
 - `/sitemap.xml`
+- `/manifest.webmanifest`
+- `/icon.svg`
+- `/apple-icon`
+- `/opengraph-image`
+- `/twitter-image`
 
 API routes:
 
@@ -147,14 +152,21 @@ API routes:
 11. Configure logs, uptime checks, cron alerts, audit failure alerts, and backup monitoring.
 12. Restrict outbound egress to public HTTP/HTTPS where possible.
 13. Run `npm run check`.
-14. Verify deployed flows:
+14. Verify public metadata:
+   - `/robots.txt` allows public pages and disallows private app/API surfaces.
+   - `/sitemap.xml` lists only public pages.
+   - `/manifest.webmanifest`, `/icon.svg`, `/apple-icon`, `/opengraph-image`, and `/twitter-image` return successful metadata assets.
+   - authenticated app routes, auth utility pages, and private shared reports include `noindex`.
+15. Verify deployed flows:
    - signup/login/logout.
    - forgot-password with production-safe behavior.
    - add website.
    - run manual audit.
    - view audit report.
-   - export PDF.
+   - open evidence dialogs for top findings and all-findings rows.
+   - export PDF and inspect the summary plus evidence appendix.
    - create share link, copy it from the modal, open it in a private window, and revoke it.
+   - confirm reports show `needs_review` items separately from confirmed failed findings.
    - call `POST /api/cron/run-scheduled`.
    - confirm `/api/health` is public and minimal.
    - confirm `/admin` and `/api/admin/health` are allowlisted.

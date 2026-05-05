@@ -1,7 +1,7 @@
 export type AuditStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type AuditCategory = "performance" | "seo" | "accessibility" | "security" | "technical" | "mobile";
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
-export type FindingStatus = "passed" | "failed" | "skipped";
+export type FindingStatus = "passed" | "failed" | "needs_review" | "skipped";
 export type ScheduleFrequency = "manual" | "daily" | "weekly" | "monthly";
 
 export type User = {

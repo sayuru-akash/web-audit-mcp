@@ -3,11 +3,27 @@ import { Activity, FileText, Globe2, Lock, ShieldCheck, TimerReset } from "lucid
 import { AddWebsiteForm } from "@/components/forms";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { currentUser } from "@/lib/auth";
+import { appBaseUrl, appDescription, appName } from "@/lib/seo";
 
 export default async function HomePage() {
   const user = await currentUser();
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: appName,
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    url: appBaseUrl().toString(),
+    description: appDescription,
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+    },
+  };
   return (
     <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <main className="hero">
         <div className="hero-nav">
           <Link className="brand" href="/">

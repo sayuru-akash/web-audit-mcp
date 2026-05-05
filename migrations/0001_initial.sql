@@ -2,7 +2,7 @@ CREATE TYPE audit_status AS ENUM ('queued', 'running', 'completed', 'failed', 'c
 CREATE TYPE audit_profile AS ENUM ('desktop', 'mobile');
 CREATE TYPE schedule_frequency AS ENUM ('manual', 'daily', 'weekly', 'monthly');
 CREATE TYPE severity AS ENUM ('critical', 'high', 'medium', 'low', 'info');
-CREATE TYPE finding_status AS ENUM ('passed', 'failed', 'skipped');
+CREATE TYPE finding_status AS ENUM ('passed', 'failed', 'needs_review', 'skipped');
 CREATE TYPE audit_category AS ENUM ('performance', 'seo', 'accessibility', 'security', 'technical', 'mobile');
 CREATE TYPE notification_type AS ENUM ('audit_completed', 'audit_failed', 'critical_issue', 'score_dropped', 'scheduled_completed');
 

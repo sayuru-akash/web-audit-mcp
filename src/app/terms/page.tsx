@@ -1,5 +1,13 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Terms of Use",
+  "Terms for safe, authorized, non-invasive website auditing with Web Audit.",
+  "/terms",
+);
 
 export default function TermsPage() {
   return (

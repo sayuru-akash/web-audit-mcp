@@ -1,5 +1,13 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { ScoreRing } from "@/components/score";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Sample Website Audit Report",
+  "Preview Web Audit's report format with category scores, metrics, and prioritized findings.",
+  "/sample-report",
+);
 
 export default function SampleReportPage() {
   return (

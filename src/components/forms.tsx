@@ -1,4 +1,5 @@
 import type { ScheduleFrequency } from "@/lib/types";
+import { RunAuditSubmit } from "@/components/run-audit-submit";
 import {
   addWebsiteAction,
   changePasswordAction,
@@ -16,9 +17,14 @@ import {
   updateWebsiteAction,
 } from "@/lib/actions";
 
-export function AddWebsiteForm() {
+export function AddWebsiteForm({ className = "form card", heading }: { className?: string; heading?: string } = {}) {
   return (
-    <form className="form card" action={addWebsiteAction}>
+    <form className={className} action={addWebsiteAction}>
+      {heading ? (
+        <div>
+          <h2>{heading}</h2>
+        </div>
+      ) : null}
       <div className="field">
         <label htmlFor="url">Website URL</label>
         <input id="url" name="url" placeholder="https://example.com" required />
@@ -38,9 +44,7 @@ export function RunAuditButton({ websiteId }: { websiteId: string }) {
   return (
     <form action={runAuditAction}>
       <input type="hidden" name="websiteId" value={websiteId} />
-      <button className="primary" type="submit">
-        Run audit
-      </button>
+      <RunAuditSubmit />
     </form>
   );
 }

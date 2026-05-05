@@ -1,5 +1,13 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Privacy Policy",
+  "How Web Audit stores account data, website URLs, audit reports, notifications, and private share links.",
+  "/privacy",
+);
 
 export default function PrivacyPage() {
   return (

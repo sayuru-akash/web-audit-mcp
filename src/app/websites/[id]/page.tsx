@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { DeleteWebsiteForm, EditWebsiteForm, RunAuditButton, ScheduleForm } from "@/components/forms";
@@ -6,6 +7,12 @@ import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { findingsFor, getUserDashboard, latestAuditFor } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Website Detail",
+  ...noIndexMetadata,
+};
 
 export default async function WebsiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

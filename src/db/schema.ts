@@ -14,7 +14,7 @@ export const auditStatusEnum = pgEnum("audit_status", ["queued", "running", "com
 export const auditProfileEnum = pgEnum("audit_profile", ["desktop", "mobile"]);
 export const scheduleFrequencyEnum = pgEnum("schedule_frequency", ["manual", "daily", "weekly", "monthly"]);
 export const severityEnum = pgEnum("severity", ["critical", "high", "medium", "low", "info"]);
-export const findingStatusEnum = pgEnum("finding_status", ["passed", "failed", "skipped"]);
+export const findingStatusEnum = pgEnum("finding_status", ["passed", "failed", "needs_review", "skipped"]);
 export const auditCategoryEnum = pgEnum("audit_category", [
   "performance",
   "seo",

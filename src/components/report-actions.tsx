@@ -46,9 +46,14 @@ export function ReportActions({
 
   async function copyShareUrl() {
     if (!shareUrl) return;
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setMessage("Share link copied.");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setMessage("Copy was blocked. Select the share URL and copy it manually.");
+    }
   }
 
   return (

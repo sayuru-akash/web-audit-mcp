@@ -1,11 +1,20 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { AuditStatusRefresh } from "@/components/audit-status-refresh";
+import { FindingEvidenceButton } from "@/components/finding-evidence";
 import { ReportActions } from "@/components/report-actions";
 import { ScoreRing, ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { absoluteUrl, timeAgo } from "@/lib/format";
+import { noIndexMetadata } from "@/lib/seo";
 import { activeShareFor, findingsFor, getUserDashboard, metricsFor } from "@/lib/store";
+
+export const metadata: Metadata = {
+  title: "Audit Report",
+  ...noIndexMetadata,
+};
 
 export default async function AuditReportPage({
   params,
@@ -26,7 +35,10 @@ export default async function AuditReportPage({
   const metrics = metricsFor(audit.id, data.metrics);
   const share = activeShareFor(audit.id, data.shareLinks);
   const shareUrl = share ? absoluteUrl(`/share/${share.token}`) : undefined;
-  const topIssues = findings.filter((finding) => finding.status === "failed").slice(0, 8);
+  const confirmedFindings = findings.filter((finding) => finding.status === "failed");
+  const passedFindings = findings.filter((finding) => finding.status === "passed");
+  const topIssues = confirmedFindings.slice(0, 8);
+  const manualReviewFindings = findings.filter((finding) => finding.status === "needs_review");
   return (
     <AppShell user={user} title="Audit report" subtitle={`${website.displayName} - ${audit.finalUrl ?? audit.requestedUrl}`}>
       <div className="report-toolbar">
@@ -38,17 +50,21 @@ export default async function AuditReportPage({
         ) : null}
       </div>
       <div style={{ height: 18 }} />
-      <div className="grid cols-3">
-        <div className="card">
+      {audit.status === "queued" || audit.status === "running" ? (
+        <>
+          <AuditStatusRefresh status={audit.status} />
+          <div style={{ height: 18 }} />
+        </>
+      ) : null}
+      <div className="report-summary">
+        <div className="card score-card">
           <ScoreRing score={audit.overallScore} />
-          <h2>{audit.overallScore ? "Overall health" : "Audit status"}</h2>
-          <p className="muted">
-            {audit.status === "failed"
-              ? audit.failureReason
-              : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}. Share URL: ${shareUrl ?? "private"}`}
-          </p>
+          <div>
+            <h2>{audit.overallScore ? "Overall health" : "Audit status"}</h2>
+            <p className="muted">{audit.status === "failed" ? audit.failureReason : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}`}</p>
+          </div>
         </div>
-        <div className="card">
+        <div className="card score-breakdown">
           <h2>Category scores</h2>
           <div className="grid">
             {audit.categoryScores
@@ -61,38 +77,54 @@ export default async function AuditReportPage({
               : null}
           </div>
         </div>
-        <div className="card">
-          <h2>Audit details</h2>
-          <p className="muted">Profile: {audit.profile}</p>
-          <p className="muted">Duration: {audit.durationMs ? Math.round(audit.durationMs / 1000) : "-"}s</p>
-          <p className="muted">Status: {audit.status}</p>
+        <div className="card classification-card">
+          <h2>Classification</h2>
+          <div className="classification-grid">
+            <div>
+              <span>Failed</span>
+              <strong>{confirmedFindings.length}</strong>
+            </div>
+            <div>
+              <span>Review</span>
+              <strong>{manualReviewFindings.length}</strong>
+            </div>
+            <div>
+              <span>Passed</span>
+              <strong>{passedFindings.length}</strong>
+            </div>
+          </div>
+          <div className="mini-meta">
+            <span>{audit.profile}</span>
+            <span>{audit.durationMs ? `${Math.round(audit.durationMs / 1000)}s` : "-s"}</span>
+            <span>{audit.status}</span>
+          </div>
         </div>
       </div>
       <div style={{ height: 18 }} />
-      <div className="grid cols-2">
-        <div className="card">
+      <div className="report-layout">
+        <div className="card panel-card">
           <h2>Top issues</h2>
-          <div className="grid">
-            {topIssues.map((finding) => (
-              <article className="issue card" key={finding.id}>
-                <div>
-                  <span className={`badge ${finding.severity}`}>{finding.severity}</span>
-                </div>
-                <h3>{finding.title}</h3>
-                <p>{finding.description}</p>
-                <p>
-                  <strong>Fix:</strong> {finding.recommendation}
-                </p>
-                <details>
-                  <summary>Evidence</summary>
-                  <p>{finding.evidence}</p>
-                  {finding.technicalDetails ? <pre>{finding.technicalDetails}</pre> : null}
-                </details>
-              </article>
-            ))}
+          <div className="issue-list">
+            {topIssues.length > 0 ? (
+              topIssues.slice(0, 6).map((finding) => (
+                <article className="issue-row" key={finding.id}>
+                  <div className="actions">
+                    <span className={`badge ${finding.severity}`}>{finding.severity}</span>
+                    <span className={`badge ${finding.status}`}>{finding.status.replace("_", " ")}</span>
+                  </div>
+                  <div>
+                    <h3>{finding.title}</h3>
+                    <p>{finding.recommendation}</p>
+                  </div>
+                  <FindingEvidenceButton finding={finding} />
+                </article>
+              ))
+            ) : (
+              <p className="muted">No confirmed failed findings in this audit.</p>
+            )}
           </div>
         </div>
-        <div className="card">
+        <div className="card panel-card">
           <h2>Metrics</h2>
           <table className="table">
             <tbody>
@@ -109,8 +141,32 @@ export default async function AuditReportPage({
           </table>
         </div>
       </div>
+      {manualReviewFindings.length > 0 ? (
+        <>
+          <div style={{ height: 18 }} />
+          <div className="card">
+            <h2>Needs manual verification</h2>
+            <p className="muted">
+              These items were detected by automation but may be platform-managed or conditional. They are visible in the report without reducing the score.
+            </p>
+            <div className="grid">
+              {manualReviewFindings.map((finding) => (
+                <article className="issue" key={finding.id}>
+                  <div className="actions">
+                    <span className={`badge ${finding.severity}`}>{finding.severity}</span>
+                    <span className={`badge ${finding.status}`}>manual review</span>
+                  </div>
+                  <h3>{finding.title}</h3>
+                  <p>{finding.recommendation}</p>
+                  <FindingEvidenceButton finding={finding} />
+                </article>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
       <div style={{ height: 18 }} />
-      <div className="card">
+      <div className="card panel-card">
         <h2>All findings</h2>
         <table className="table">
           <tbody>
@@ -125,7 +181,10 @@ export default async function AuditReportPage({
                 </td>
                 <td>{finding.category}</td>
                 <td>
-                  <span className={`badge ${finding.status}`}>{finding.status}</span>
+                  <span className={`badge ${finding.status}`}>{finding.status.replace("_", " ")}</span>
+                </td>
+                <td>
+                  <FindingEvidenceButton finding={finding} />
                 </td>
               </tr>
             ))}

@@ -40,6 +40,8 @@ Example MCP client configuration:
 
 Tool annotations are set so clients can distinguish read-only validation/report tools from the persistence tool. `save_website_and_audit` is the only MCP tool that writes product data.
 
+Returned findings can use `failed`, `needs_review`, `passed`, or `skipped` status. `needs_review` is used for automation-limited items such as provider-managed same-origin assets that should be checked in a real browser before a fix is assigned.
+
 ## Connect Codex Or Claude
 
 See [docs/agent-connections.md](agent-connections.md) for exact Codex CLI, Codex config.toml, Claude Code, Claude Desktop, generic MCP JSON, and ChatGPT/API remote-MCP guidance.
@@ -79,6 +81,7 @@ MCP tools must preserve:
 - redirect-hop validation.
 - timeout and response-size limits.
 - HTML-only audit fetch behavior.
-- non-invasive same-origin link status checks only.
+- non-invasive same-origin link and asset status checks only.
+- manual-review classification for automation-limited provider resources without bypassing URL safety.
 
 Do not add MCP tools that bypass `assertPublicUrl`, redirect validation, rate limits where persistence is involved, or the shared audit engine safety model.

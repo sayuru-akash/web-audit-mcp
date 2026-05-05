@@ -1,9 +1,16 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { AddWebsiteForm, RunAuditButton } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { getUserDashboard, latestAuditFor } from "@/lib/store";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Websites",
+  ...noIndexMetadata,
+};
 
 export default async function WebsitesPage() {
   const user = await requireUser();

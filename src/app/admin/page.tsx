@@ -1,7 +1,14 @@
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { requireAdmin } from "@/lib/auth";
 import { getOperationalHealth } from "@/lib/audit-service";
 import { getStoreHealth } from "@/lib/store";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "System Health",
+  ...noIndexMetadata,
+};
 
 export default async function AdminPage() {
   const user = await requireAdmin();

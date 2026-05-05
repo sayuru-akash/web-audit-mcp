@@ -1,4 +1,11 @@
+import type { Metadata } from "next";
 import { ForgotPasswordForm } from "@/components/forms";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Reset Password",
+  ...noIndexMetadata,
+};
 
 export default async function ForgotPasswordPage({
   searchParams,

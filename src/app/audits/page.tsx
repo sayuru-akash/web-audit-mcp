@@ -1,10 +1,17 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { paginate, Pagination } from "@/components/pagination";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { getUserDashboard } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Audits",
+  ...noIndexMetadata,
+};
 
 export default async function AuditsPage({ searchParams }: { searchParams: Promise<{ page?: string; status?: string }> }) {
   const query = await searchParams;

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import {
   ChangePasswordForm,
@@ -6,6 +7,12 @@ import {
   ProfileForm,
 } from "@/components/forms";
 import { requireUser } from "@/lib/auth";
+import { noIndexMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = {
+  title: "Settings",
+  ...noIndexMetadata,
+};
 
 export default async function SettingsPage() {
   const user = await requireUser();

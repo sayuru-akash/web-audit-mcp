@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { Element } from "domhandler";
 import type { AuditCategory, Finding, Metric } from "@/lib/types";
 import { id } from "@/lib/store";
 import { assertPublicUrl, MAX_REDIRECTS, safeRedirectTarget, sameOriginInternalLinks } from "@/lib/url";
@@ -36,6 +37,12 @@ const USER_AGENT = "WebAuditBot/0.1 (+https://webaudit.local; safe non-invasive 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_HTML_BYTES = 2_000_000;
 const MAX_LINK_CHECKS = 8;
+const FINDING_STATUS_WEIGHT: Record<Finding["status"], number> = {
+  failed: 0,
+  needs_review: 40,
+  skipped: 70,
+  passed: 90,
+};
 
 function finding(
   category: AuditCategory,
@@ -58,7 +65,7 @@ function finding(
     impact,
     recommendation,
     technicalDetails,
-    sortPriority: severityRank(severity) * 100,
+    sortPriority: severityRank(severity) * 100 + FINDING_STATUS_WEIGHT[status],
   };
 }
 
@@ -66,7 +73,7 @@ function metric(category: AuditCategory, key: string, label: string, value: stri
   return { category, key, label, value, unit };
 }
 
-async function fetchOnce(url: string, method: "GET" | "HEAD" = "GET"): Promise<Response> {
+async function fetchOnce(url: string, method: "GET" | "HEAD" = "GET", accept = "text/html,application/xhtml+xml"): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -74,7 +81,7 @@ async function fetchOnce(url: string, method: "GET" | "HEAD" = "GET"): Promise<R
       method,
       redirect: "manual",
       signal: controller.signal,
-      headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
+      headers: { "user-agent": USER_AGENT, accept },
     });
   } finally {
     clearTimeout(timeout);
@@ -86,19 +93,23 @@ async function safeFetch(
   method: "GET" | "HEAD" = "GET",
   redirects = 0,
   chain: string[] = [],
+  accept?: string,
 ): Promise<SafeFetchResult> {
   const safe = await assertPublicUrl(url);
-  const response = await fetchOnce(safe.normalizedUrl, method);
+  const response = await fetchOnce(safe.normalizedUrl, method, accept);
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = response.headers.get("location");
     if (!location) throw new Error("The website returned a redirect without a Location header.");
     if (redirects >= MAX_REDIRECTS) throw new Error(`The URL exceeded the ${MAX_REDIRECTS} redirect limit.`);
     const target = await safeRedirectTarget(safe.normalizedUrl, location);
     const nextMethod = response.status === 303 ? "GET" : method;
-    const next = await safeFetch(target.normalizedUrl, nextMethod, redirects + 1, [
-      ...chain,
-      `${response.status} ${safe.normalizedUrl} -> ${target.normalizedUrl}`,
-    ]);
+    const next = await safeFetch(
+      target.normalizedUrl,
+      nextMethod,
+      redirects + 1,
+      [...chain, `${response.status} ${safe.normalizedUrl} -> ${target.normalizedUrl}`],
+      accept,
+    );
     return { ...next, redirected: true };
   }
   return { response, finalUrl: safe.normalizedUrl, redirected: redirects > 0, redirectChain: chain };
@@ -127,19 +138,31 @@ async function fetchPage(url: string): Promise<FetchedPage> {
   };
 }
 
-async function checkEndpoint(url: string): Promise<number | undefined> {
+async function checkEndpoint(url: string): Promise<{ status?: number; method?: "HEAD" | "GET"; note?: string }> {
   try {
-    const { response } = await safeFetch(url, "HEAD");
-    return response.status;
+    const { response } = await safeFetch(url, "HEAD", 0, [], "*/*");
+    if (response.status < 400) return { status: response.status, method: "HEAD" };
+    const fallback = await safeFetch(url, "GET", 0, [], "*/*");
+    return {
+      status: fallback.response.status,
+      method: "GET",
+      note: `HEAD returned ${response.status}; GET verification returned ${fallback.response.status}.`,
+    };
   } catch {
-    return undefined;
+    try {
+      const { response } = await safeFetch(url, "GET", 0, [], "*/*");
+      return { status: response.status, method: "GET", note: "HEAD check failed; GET verification completed." };
+    } catch {
+      return {};
+    }
   }
 }
 
 async function checkLinks(links: string[]) {
-  const results: { url: string; status?: number }[] = [];
+  const results: { url: string; status?: number; method?: "HEAD" | "GET"; note?: string }[] = [];
   for (const link of links) {
-    results.push({ url: link, status: await checkEndpoint(link) });
+    const result = await checkEndpoint(link);
+    results.push({ url: link, ...result });
   }
   return results;
 }
@@ -176,6 +199,68 @@ function resolveSameOriginUrls(baseUrl: string, values: string[], limit: number)
   return [...seen];
 }
 
+function platformManagedAssetReason(url: string): string | undefined {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (pathname.startsWith("/cdn-cgi/")) {
+      return "Cloudflare-managed resource. These URLs can be injected conditionally and may respond differently by feature settings, user agent, or bot/security rules.";
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function formatCheckedResource(item: { url: string; status?: number; method?: "HEAD" | "GET"; note?: string }) {
+  const status = item.status ?? "unreachable";
+  const method = item.method ? ` via ${item.method}` : "";
+  const note = item.note ? ` (${item.note})` : "";
+  return `${status}${method} ${item.url}${note}`;
+}
+
+function truncateText(value: string, maxLength = 220) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}...` : normalized;
+}
+
+function elementEvidence(
+  $: cheerio.CheerioAPI,
+  nodes: Element[],
+  options: { title: string; attrs?: string[]; limit?: number; includeHtml?: boolean },
+) {
+  const limit = options.limit ?? 20;
+  if (nodes.length === 0) return `${options.title}\nNone detected.`;
+  const includeHtml = options.includeHtml ?? true;
+  const lines = nodes.slice(0, limit).map((node, index) => {
+    const element = $(node);
+    const attrs = (options.attrs ?? ["id", "class", "href", "src", "alt", "aria-label", "role"])
+      .map((name) => {
+        const value = element.attr(name);
+        return value ? `${name}="${truncateText(value, 140)}"` : "";
+      })
+      .filter(Boolean)
+      .join(" ");
+    const text = truncateText(element.text(), 160);
+    const html = truncateText($.html(node), 260);
+    return [
+      `${index + 1}. <${node.tagName.toLowerCase()}> ${attrs}`.trim(),
+      text ? `   text: ${text}` : "",
+      includeHtml ? `   html: ${html}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+  if (nodes.length > limit) {
+    lines.push(`... ${nodes.length - limit} more element(s) not shown in this capped evidence sample.`);
+  }
+  return `${options.title}\n${lines.join("\n\n")}`;
+}
+
+function keyValueEvidence(title: string, entries: { label: string; value: string }[], limit = 20) {
+  const lines = entries.slice(0, limit).map((entry, index) => `${index + 1}. ${entry.label}: ${truncateText(entry.value, 260)}`);
+  if (entries.length > limit) lines.push(`... ${entries.length - limit} more item(s) not shown in this capped evidence sample.`);
+  return `${title}\n${lines.join("\n")}`;
+}
+
 export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
   const safe = await assertPublicUrl(inputUrl);
   const page = await fetchPage(safe.normalizedUrl);
@@ -197,6 +282,30 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
     .filter(Boolean);
   const resourceCount =
     $("script[src]").length + $('link[rel="stylesheet"]').length + $("img[src]").length + $("iframe[src]").length;
+  const resourceEvidence = keyValueEvidence("Initial HTML resource references", [
+    { label: "script[src]", value: String($("script[src]").length) },
+    { label: "stylesheet links", value: String($('link[rel="stylesheet"]').length) },
+    { label: "image[src]", value: String($("img[src]").length) },
+    { label: "iframe[src]", value: String($("iframe[src]").length) },
+    {
+      label: "sample script URLs",
+      value: $("script[src]")
+        .toArray()
+        .slice(0, 8)
+        .map((node) => $(node).attr("src") ?? "")
+        .filter(Boolean)
+        .join(" | "),
+    },
+    {
+      label: "sample image URLs",
+      value: $("img[src]")
+        .toArray()
+        .slice(0, 8)
+        .map((node) => $(node).attr("src") ?? "")
+        .filter(Boolean)
+        .join(" | "),
+    },
+  ]);
   const viewport = $('meta[name="viewport"]').attr("content") ?? "";
   const canonical = $('link[rel="canonical"]').attr("href") ?? "";
   const robotsMeta = $('meta[name="robots"]').attr("content") ?? "";
@@ -372,6 +481,8 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${resourceCount} referenced resources`,
         "More requests increase network coordination and render delay.",
         "Bundle carefully, lazy-load below-the-fold media, and remove unused third-party assets.",
+        "failed",
+        resourceEvidence,
       ),
     );
   }
@@ -556,6 +667,12 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${imagesMissingAlt.length} image(s) without alt text`,
         "Screen reader users may miss meaningful visual content.",
         "Add concise alt text for meaningful images and empty alt text for decorative images.",
+        "failed",
+        elementEvidence($, imagesMissingAlt, {
+          title: "Image elements missing alt text",
+          attrs: ["src", "data-src", "data-lazy-src", "width", "height", "loading", "class", "id", "role"],
+          includeHtml: false,
+        }),
       ),
     );
   }
@@ -569,6 +686,11 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${formControlsMissingLabels.length} control(s) missing labels`,
         "Users of assistive technology may not know what information to enter.",
         "Connect each field to a visible label or an appropriate aria-label.",
+        "failed",
+        elementEvidence($, formControlsMissingLabels, {
+          title: "Form controls missing programmatic labels",
+          attrs: ["type", "name", "id", "placeholder", "class", "aria-label", "aria-labelledby"],
+        }),
       ),
     );
   }
@@ -582,6 +704,11 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${unnamedButtons.length} unnamed interactive element(s)`,
         "Keyboard and screen reader users may not understand the action.",
         "Add visible text, aria-labels, or titles that describe each action.",
+        "failed",
+        elementEvidence($, unnamedButtons, {
+          title: "Interactive elements without accessible names",
+          attrs: ["href", "type", "id", "class", "aria-label", "title", "role"],
+        }),
       ),
     );
   }
@@ -621,6 +748,17 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${duplicateIds.length} duplicate ID(s), ${missingAriaReferences.length} missing ARIA reference(s)`,
         "Broken references can make labels and descriptions unavailable to assistive technology.",
         "Ensure IDs are unique and aria-labelledby/aria-describedby values point to existing elements.",
+        "failed",
+        keyValueEvidence("ARIA and ID reference details", [
+          {
+            label: "duplicate ids",
+            value: [...new Set(duplicateIds)].join(", ") || "none",
+          },
+          {
+            label: "missing aria references",
+            value: [...new Set(missingAriaReferences)].join(", ") || "none",
+          },
+        ]),
       ),
     );
   }
@@ -873,6 +1011,24 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${unsafeBlankTargets.length} unsafe blank target(s), ${javascriptLinks.length} javascript link(s), ${brokenHashLinks.length} broken hash link(s)`,
         "Weak link hygiene can create security, accessibility, and navigation issues.",
         "Add rel=\"noopener noreferrer\" to new-tab links, avoid javascript: links, and ensure hash targets exist.",
+        "failed",
+        [
+          elementEvidence($, unsafeBlankTargets, {
+            title: "Links opening new tabs without both noopener and noreferrer",
+            attrs: ["href", "target", "rel", "aria-label", "class", "id"],
+            limit: 12,
+          }),
+          elementEvidence($, javascriptLinks, {
+            title: "javascript: links",
+            attrs: ["href", "aria-label", "class", "id"],
+            limit: 12,
+          }),
+          elementEvidence($, brokenHashLinks, {
+            title: "Hash links without matching targets",
+            attrs: ["href", "aria-label", "class", "id"],
+            limit: 12,
+          }),
+        ].join("\n\n"),
       ),
     );
   }
@@ -918,20 +1074,42 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
   }
 
   const assetResults = await checkLinks(assetUrls);
-  const brokenAssets = assetResults.filter((result) => !result.status || result.status >= 400);
+  const failedAssetResults = assetResults.filter((result) => !result.status || result.status >= 400);
+  const manualReviewAssets = failedAssetResults.flatMap((result) => {
+    const reviewReason = platformManagedAssetReason(result.url);
+    return reviewReason ? [{ ...result, reviewReason }] : [];
+  });
+  const manualReviewUrls = new Set(manualReviewAssets.map((result) => result.url));
+  const brokenAssets = failedAssetResults.filter((result) => !manualReviewUrls.has(result.url));
   metrics.push(metric("technical", "checked_assets", "Same-origin assets checked", assetResults.length));
+  if (manualReviewAssets.length > 0) {
+    metrics.push(metric("technical", "assets_needing_manual_review", "Assets needing manual review", manualReviewAssets.length));
+    findings.push(
+      finding(
+        "technical",
+        "info",
+        "Platform-managed assets need manual verification",
+        "Some provider-managed same-origin assets did not respond successfully to automated verification.",
+        `${manualReviewAssets.length} of ${assetResults.length} checked assets need manual review`,
+        "Provider-managed resources may be conditional, injected by the edge platform, or visible only for specific visitors. Treat them as review items, not confirmed broken site assets.",
+        "Open the page in a browser, inspect the Network panel, and confirm whether the platform-managed resource is requested by real visitors before changing site code.",
+        "needs_review",
+        manualReviewAssets.map((item) => `${formatCheckedResource(item)}\nReview: ${item.reviewReason}`).join("\n\n"),
+      ),
+    );
+  }
   if (brokenAssets.length > 0) {
     findings.push(
       finding(
         "technical",
         "medium",
-        "Some same-origin assets failed",
-        "A limited same-origin asset check found scripts, styles, images, or icons that failed.",
-        `${brokenAssets.length} of ${assetResults.length} checked assets failed`,
+        "Some same-origin assets are confirmed failing",
+        "A limited same-origin asset check confirmed scripts, styles, images, or icons that failed after GET verification.",
+        `${brokenAssets.length} of ${assetResults.length} checked assets failed after verification`,
         "Broken assets can harm rendering, tracking, interaction, or brand presentation.",
         "Fix, remove, or redirect failing asset URLs.",
         "failed",
-        brokenAssets.map((item) => `${item.status ?? "unreachable"} ${item.url}`).join("\n"),
+        brokenAssets.map(formatCheckedResource).join("\n"),
       ),
     );
   }
@@ -951,7 +1129,7 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         "Broken links create dead ends for visitors and search crawlers.",
         "Fix or redirect the failing internal URLs.",
         "failed",
-        broken.map((item) => `${item.status ?? "unreachable"} ${item.url}`).join("\n"),
+        broken.map(formatCheckedResource).join("\n"),
       ),
     );
   }

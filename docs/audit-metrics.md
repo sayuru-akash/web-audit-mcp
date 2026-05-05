@@ -1,6 +1,7 @@
 # Audit Metrics
 
 Metrics are compact signals stored with every completed audit. Findings explain what to fix; metrics explain what was measured.
+Findings can also store `technicalDetails` with capped element examples, checked URLs, or header values. The report UI renders those details in evidence dialogs with copy support and image previews when image URLs are present.
 
 ## Score Outputs
 
@@ -29,9 +30,18 @@ Metrics are compact signals stored with every completed audit. Findings explain 
 | `robots_status` | SEO | none | Fetch status for `/robots.txt`, or `unreachable`. |
 | `sitemap_status` | SEO | none | Fetch status for `/sitemap.xml`, or `unreachable`. |
 | `checked_assets` | Technical | count | Same-origin assets checked for basic response health. |
+| `assets_needing_manual_review` | Technical | count | Same-origin provider-managed assets that failed automated verification but should be manually confirmed in a browser. |
 | `checked_internal_links` | Technical | count | Same-origin internal links checked for basic response health. |
 
 ## Coverage Boundary
 
 These metrics are intentionally server-side and non-invasive. They do not include Lighthouse lab metrics, browser rendering timings, JavaScript execution traces, crawl-depth metrics, keyword rank data, or vulnerability scanner outputs.
 
+Findings use four statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `failed` | Confirmed automated issue and counted in scoring. |
+| `needs_review` | Automation found a signal that may be conditional, provider-managed, or browser-context dependent; visible in reports but not scored as a failure. |
+| `passed` | Positive automated confirmation. |
+| `skipped` | Check was intentionally not run or not applicable. |

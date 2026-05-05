@@ -144,7 +144,11 @@ export async function processAudit(auditId: string, source: "manual" | "schedule
           message: `${website?.displayName ?? "Website"} finished its scheduled audit.`,
         });
       }
-      if (data.findings.some((finding) => finding.auditRunId === auditId && finding.severity === "critical")) {
+      if (
+        data.findings.some(
+          (finding) => finding.auditRunId === auditId && finding.status === "failed" && finding.severity === "critical",
+        )
+      ) {
         addNotification(data, {
           userId: current.userId,
           websiteId: current.websiteId,

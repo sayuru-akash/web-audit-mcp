@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { overallScore, scoreAll, scoreLabel } from "../scoring";
 import type { Finding } from "../types";
 
-const finding = (category: Finding["category"], severity: Finding["severity"]): Finding => ({
+const finding = (
+  category: Finding["category"],
+  severity: Finding["severity"],
+  status: Finding["status"] = "failed",
+): Finding => ({
   id: `${category}-${severity}`,
   auditRunId: "audit",
   category,
   severity,
-  status: "failed",
+  status,
   title: "Issue",
   description: "Description",
   evidence: "Evidence",
@@ -22,6 +26,11 @@ describe("scoring", () => {
     expect(scores.seo).toBe(76);
     expect(scores.security).toBe(65);
     expect(scores.performance).toBe(100);
+  });
+
+  it("does not penalize manual-review findings", () => {
+    const scores = scoreAll([finding("technical", "medium", "needs_review")]);
+    expect(scores.technical).toBe(100);
   });
 
   it("calculates weighted overall score", () => {
