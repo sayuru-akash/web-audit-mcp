@@ -61,6 +61,7 @@ export async function createPasswordResetToken(email: string): Promise<string | 
   await updateStore((data) => {
     const user = data.users.find((item) => item.email === email);
     if (!user) return;
+    data.passwordResetTokens = data.passwordResetTokens.filter((item) => item.userId !== user.id && !item.usedAt);
     const createdAt = nowIso();
     data.passwordResetTokens.push({
       id: id(),

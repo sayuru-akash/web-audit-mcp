@@ -12,15 +12,19 @@ The v1 product boundary is intentional: this is a page audit with selected websi
 - [Audit Model](#audit-model)
 - [Security Model](#security-model)
 - [MCP Server](#mcp-server)
+- [Agent Connections](#agent-connections)
 - [Setup](#setup)
 - [Environment Variables](#environment-variables)
 - [Commands](#commands)
 - [Application Routes](#application-routes)
 - [Data Storage](#data-storage)
-- [Deployment Guidance](#deployment-guidance)
+- [Metrics](#metrics)
+- [Production Posture](#production-posture)
+- [Production Deployment Checklist](#production-deployment-checklist)
 - [Verification](#verification)
 - [Limitations](#limitations)
 - [Future Production Migrations](#future-production-migrations)
+- [Further Documentation](#further-documentation)
 - [Agent Notes](#agent-notes)
 
 ## Product Scope
@@ -55,6 +59,7 @@ Implemented product surfaces:
 - Private share links for completed audits.
 - Scheduled audit endpoint protected by `CRON_SECRET` in production and rate limited.
 - Local JSON persistence for self-hosted/single-node operation.
+- Postgres/Drizzle schema and initial SQL migration are present for the production migration path, but the current runtime store remains JSON until the service adapter is switched.
 - MCP stdio server exposing validation, audit, persistence, and report retrieval tools.
 
 ## Architecture
@@ -88,6 +93,7 @@ Key modules:
 - `src/lib/audit-service.ts` manages website records, audit runs, schedules, share links, and notifications.
 - `src/lib/url.ts` normalizes URLs and blocks local/private/internal network targets before audit work starts.
 - `src/lib/store.ts` persists local runtime data to `data/webaudit.json`.
+- `src/db/schema.ts` and `migrations/0001_initial.sql` define the production Postgres schema path.
 - `src/mcp/server.ts` exposes the local MCP stdio tools.
 - `scripts/worker-once.ts` processes queued audit runs from the same service layer.
 
@@ -118,12 +124,12 @@ sequenceDiagram
 
 Audit categories:
 
-- Performance: initial HTML response time, HTML size, resource reference count.
-- SEO: title, meta description, H1 structure, canonical URL, Open Graph title, structured data, robots.txt, sitemap.xml, noindex.
-- Accessibility: missing image alt text, missing form labels, unnamed interactive elements, heading order, and a clear note that automated coverage is limited.
-- Security basics: HTTPS final URL check and common browser security headers.
-- Technical health: HTTP status and limited same-origin internal link status checks.
-- Mobile readiness: viewport metadata.
+- Performance: initial HTML response time, HTML size, compression, resource reference count.
+- SEO: title, meta description quality, H1 structure, canonical quality, Open Graph/Twitter metadata, structured data presence and parse validity, robots.txt content basics, sitemap.xml content basics, noindex signals.
+- Accessibility: missing image alt text, missing form labels, unnamed interactive elements, heading order, document language, main landmark, duplicate IDs, ARIA reference integrity, and a clear note that automated coverage is limited.
+- Security basics: HTTPS final URL check, common browser security headers, header quality, mixed-content signals, unsafe referrer policy, permissive CSP signals.
+- Technical health: HTTP status, redirect chain metrics, HTML structure signals, link hygiene, limited same-origin internal link checks, and limited same-origin asset checks.
+- Mobile readiness: viewport metadata and zoom-restriction signals.
 
 The audit engine checks the submitted page as the primary target and checks a small limited number of same-origin links for basic status health. It does not crawl an entire site.
 
@@ -190,6 +196,21 @@ Example tool workflow:
 
 MCP persistence uses the same `data/webaudit.json` store as the web app. `save_website_and_audit` creates an internal `agent@webaudit.local` user if it does not already exist.
 
+## Agent Connections
+
+For Codex, Claude, Claude Desktop, and generic MCP clients, see [docs/agent-connections.md](docs/agent-connections.md).
+
+Short version:
+
+```bash
+npm run mcp
+codex mcp add web-audit -- npm run mcp
+claude mcp add --transport stdio --scope local web-audit -- npm run mcp
+npm run mcp:smoke -- https://example.com --run-audit
+```
+
+Codex and Claude can use this product today through the local stdio MCP server. ChatGPT custom connectors and OpenAI API MCP integrations need a remote HTTP MCP server; that is a future transport, not the current local stdio server.
+
 ## Setup
 
 Prerequisites:
@@ -248,6 +269,7 @@ npm run mcp
 | `CRON_SECRET` | Required outside development | `replace-for-production` | `POST /api/cron/run-scheduled` | Callers must send `Authorization: Bearer <CRON_SECRET>` when configured. Use a strong random value. |
 | `ADMIN_EMAILS` | Required outside development for admin access | `admin@example.com` | `/admin`, `/api/admin/health` | Comma-separated email allowlist. |
 | `WEB_AUDIT_DEV_RESET_TOKENS` | No | `false` | Forgot-password flow | When `true`, local reset tokens are displayed in the UI for development only. |
+| `DATABASE_URL` | Optional, not consumed by current runtime | `postgresql://...` | Future Postgres/Drizzle adapter | Schema and SQL migration exist, but keep unset until the runtime adapter is enabled. See [docs/production.md](docs/production.md). |
 
 This repo does not currently require external database, queue, object storage, email, analytics, or payment provider environment variables. Add those only when the matching infrastructure is actually implemented.
 
@@ -263,8 +285,10 @@ This repo does not currently require external database, queue, object storage, e
 | `npm run test` | Run Vitest tests. |
 | `npm run check` | Run lint, typecheck, tests, and build. This is the repo health gate. |
 | `npm run mcp` | Start the MCP stdio server. |
+| `npm run mcp:smoke -- https://example.com --run-audit` | Start the MCP server through an SDK client, verify tool registration, validate a URL, and optionally run an audit. |
 | `npm run audit:url -- https://example.com` | Run a one-off CLI page audit and print JSON. |
 | `npm run worker:once -- 5` | Process up to five queued audit runs. |
+| `npm run db:schema:check` | Verify the committed Drizzle schema table set. |
 
 ## Application Routes
 
@@ -292,6 +316,13 @@ API routes:
 - `POST /api/cron/run-scheduled` runs due scheduled audits and queued jobs, protected by `CRON_SECRET` outside development.
 - `GET /api/health` returns public liveness only.
 
+Route notes:
+
+- `/admin` and `/api/admin/health` require a signed-in user whose email is present in `ADMIN_EMAILS` outside development.
+- `/api/health` intentionally returns only `{ ok: true, service: "web-audit" }`; use it for liveness, not private operational status.
+- `/share/[token]` is a private unlisted report link, not public report indexing. Revoke share links from the owned audit page.
+- `/robots.txt` and `/sitemap.xml` are generated by `src/app/robots.ts` and `src/app/sitemap.ts`.
+
 ## Data Storage
 
 Runtime data is stored in:
@@ -315,7 +346,44 @@ The store contains:
 
 This local JSON store is useful for development, demos, and single-node self-hosted operation. It is not a multi-instance production database and should not be shared by multiple concurrent application instances.
 
-## Deployment Guidance
+Local JSON limits:
+
+- Writes are serialized only inside the current Node.js process.
+- Multiple app instances, serverless instances, or worker processes can race when writing the same file.
+- Rate limits are local to the JSON store and are not a distributed abuse-control mechanism.
+- Backups are file-level only unless you add a database export process.
+- Treat the JSON file as operational state containing private account and audit data.
+
+Optional Postgres/Drizzle path:
+
+- `@neondatabase/serverless` and `drizzle-orm` are installed as the intended production database direction.
+- `src/db/schema.ts` defines users, sessions, websites, audits, findings, metrics, notifications, share links, and password reset tokens.
+- `migrations/0001_initial.sql` contains the initial PostgreSQL schema.
+- Do not set `DATABASE_URL` and assume production persistence is active until the store layer is migrated from `src/lib/store.ts` to a real Postgres adapter.
+- A safe migration should add the runtime adapter, shared rate-limit storage, backup/restore drills, and parity tests for website/audit/share/auth flows.
+
+## Metrics
+
+Every completed audit stores category scores, findings, and metrics. The current metric keys are:
+
+| Key | Category | Unit | Meaning |
+| --- | --- | --- | --- |
+| `http_status` | Technical | none | Final audited page HTTP status. |
+| `html_size` | Technical | KB | Initial HTML response size. |
+| `response_time` | Performance | ms | Initial HTML response time. |
+| `redirect_hops` | Technical | count | Validated redirect hops. |
+| `content_encoding` | Performance | none | HTML content encoding or `none`. |
+| `resource_count` | Performance | count | Initial HTML resource references. |
+| `internal_links_seen` | SEO | count | Same-origin internal links detected. |
+| `images_missing_alt` | Accessibility | count | Images missing `alt`. |
+| `robots_status` | SEO | none | `/robots.txt` fetch status. |
+| `sitemap_status` | SEO | none | `/sitemap.xml` fetch status. |
+| `checked_assets` | Technical | count | Limited same-origin assets checked. |
+| `checked_internal_links` | Technical | count | Limited internal links checked. |
+
+See [docs/audit-metrics.md](docs/audit-metrics.md) for the full score and metric contract.
+
+## Production Posture
 
 Single-node deployment can run the web app and MCP server from the same checkout, using the local JSON store. For that mode:
 
@@ -329,6 +397,37 @@ Single-node deployment can run the web app and MCP server from the same checkout
 - Monitor failures from `/api/health`, application logs, and scheduled audit responses.
 
 For serverless or multi-instance deployment, do not rely on `data/webaudit.json`. Move persistence and job execution to production infrastructure first.
+
+Production security controls that must stay enabled:
+
+- SSRF blocking in every audit path, including MCP tools and future worker code.
+- Public DNS resolution before audit execution and private/internal IP blocking.
+- Redirect-hop validation before each follow.
+- HTTP/HTTPS-only audits with credentials and URL fragments stripped.
+- Fetch timeout, HTML content-type check, and 2 MB HTML cap.
+- Public audit, user audit, website creation, and cron rate limits.
+- Admin allowlisting via `ADMIN_EMAILS`.
+- Cron authorization via `CRON_SECRET`.
+- HTTP-only session cookies with secure cookies in production.
+- Serialized writes while JSON storage remains in use.
+
+## Production Deployment Checklist
+
+Before a real production launch:
+
+1. Confirm product scope copy says "page audit with selected website health checks" and does not imply crawling, penetration testing, Lighthouse lab scoring, or vulnerability scanning.
+2. Run `npm install` from a clean checkout and keep `package-lock.json` committed.
+3. Set `NEXT_PUBLIC_APP_URL` to the exact deployed HTTPS origin.
+4. Set a strong random `CRON_SECRET` and configure the scheduler to call `POST /api/cron/run-scheduled` with `Authorization: Bearer <secret>`.
+5. Set `ADMIN_EMAILS` to the production operator allowlist and verify `/admin` plus `/api/admin/health` deny non-admin users.
+6. Keep `WEB_AUDIT_DEV_RESET_TOKENS=false`.
+7. Decide storage mode. For single-node JSON, mount persistent private storage for `data/`, run one writer, and back it up. For multi-instance/serverless, implement the Postgres/Drizzle migration first.
+8. Decide worker mode. For JSON storage, avoid multiple concurrent writers. For durable production, move queued/scheduled work to a shared queue and keep URL safety validation inside the worker.
+9. Add real password-reset email delivery before relying on forgot-password in production.
+10. Add structured logs, uptime checks, cron failure alerts, backup monitoring, and restore testing.
+11. Restrict outbound egress where possible to public HTTP/HTTPS destinations and block metadata/private networks at the platform/firewall layer too.
+12. Run `npm run check`.
+13. Exercise one manual audit, one PDF export, one share-link create/revoke, one scheduled audit call, one admin health call, and the MCP tools against the deployed environment.
 
 ## Verification
 
@@ -346,6 +445,7 @@ npm run typecheck
 npm run test
 npm run build
 npm run audit:url -- https://example.com
+npm run mcp:smoke -- https://example.com --run-audit
 npm run worker:once -- 5
 ```
 
@@ -402,12 +502,13 @@ Production migration checklist:
 - Add rate limits backed by shared storage.
 - Add backups and restore drills for the production database.
 
+## Further Documentation
+
+- [docs/production.md](docs/production.md) covers deployment posture, JSON limits, optional Postgres/Drizzle migration expectations, security controls, and the exact launch checklist.
+- [docs/mcp.md](docs/mcp.md) covers MCP setup, tool behavior, persistence boundaries, and safety expectations.
+- [docs/agent-connections.md](docs/agent-connections.md) covers Codex, Claude, Claude Desktop, generic MCP client, and ChatGPT/API connection paths.
+- [docs/audit-metrics.md](docs/audit-metrics.md) covers score outputs and stored metric keys.
+
 ## Agent Notes
 
-Before changing product behavior, read:
-
-- `SPEC.md`
-- `DESIGN.md`
-- `webaudit_agent_development_brief.md`
-
-Keep the UI report-first, calm, professional, and honest about v1 scope. Do not imply full-site crawling or penetration testing. Keep SSRF protections, rate limits, timeouts, and private network blocking active in every audit path, including MCP tools.
+Use this README and the files under `docs/` as the current product source of truth. Keep the UI report-first, calm, professional, and honest about v1 scope. Do not imply full-site crawling or penetration testing. Keep SSRF protections, rate limits, timeouts, and private network blocking active in every audit path, including MCP tools.

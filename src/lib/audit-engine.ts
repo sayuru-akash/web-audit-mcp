@@ -22,12 +22,14 @@ type FetchedPage = {
   durationMs: number;
   bytes: number;
   redirected: boolean;
+  redirectChain: string[];
 };
 
 type SafeFetchResult = {
   response: Response;
   finalUrl: string;
   redirected: boolean;
+  redirectChain: string[];
 };
 
 const USER_AGENT = "WebAuditBot/0.1 (+https://webaudit.local; safe non-invasive page audit)";
@@ -79,7 +81,12 @@ async function fetchOnce(url: string, method: "GET" | "HEAD" = "GET"): Promise<R
   }
 }
 
-async function safeFetch(url: string, method: "GET" | "HEAD" = "GET", redirects = 0): Promise<SafeFetchResult> {
+async function safeFetch(
+  url: string,
+  method: "GET" | "HEAD" = "GET",
+  redirects = 0,
+  chain: string[] = [],
+): Promise<SafeFetchResult> {
   const safe = await assertPublicUrl(url);
   const response = await fetchOnce(safe.normalizedUrl, method);
   if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -88,15 +95,18 @@ async function safeFetch(url: string, method: "GET" | "HEAD" = "GET", redirects 
     if (redirects >= MAX_REDIRECTS) throw new Error(`The URL exceeded the ${MAX_REDIRECTS} redirect limit.`);
     const target = await safeRedirectTarget(safe.normalizedUrl, location);
     const nextMethod = response.status === 303 ? "GET" : method;
-    const next = await safeFetch(target.normalizedUrl, nextMethod, redirects + 1);
+    const next = await safeFetch(target.normalizedUrl, nextMethod, redirects + 1, [
+      ...chain,
+      `${response.status} ${safe.normalizedUrl} -> ${target.normalizedUrl}`,
+    ]);
     return { ...next, redirected: true };
   }
-  return { response, finalUrl: safe.normalizedUrl, redirected: redirects > 0 };
+  return { response, finalUrl: safe.normalizedUrl, redirected: redirects > 0, redirectChain: chain };
 }
 
 async function fetchPage(url: string): Promise<FetchedPage> {
   const started = performance.now();
-  const { response, finalUrl, redirected } = await safeFetch(url);
+  const { response, finalUrl, redirected, redirectChain } = await safeFetch(url);
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html")) {
     throw new Error(`The URL returned ${contentType || "non-HTML content"}, not an HTML page.`);
@@ -113,6 +123,7 @@ async function fetchPage(url: string): Promise<FetchedPage> {
     durationMs: Math.round(performance.now() - started),
     bytes: buffer.byteLength,
     redirected,
+    redirectChain,
   };
 }
 
@@ -131,6 +142,38 @@ async function checkLinks(links: string[]) {
     results.push({ url: link, status: await checkEndpoint(link) });
   }
   return results;
+}
+
+async function fetchTextCapped(url: string, maxBytes = 250_000): Promise<{ status?: number; text?: string }> {
+  try {
+    const { response } = await safeFetch(url);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return { status: response.status, text: buffer.subarray(0, maxBytes).toString("utf8") };
+  } catch {
+    return {};
+  }
+}
+
+function parseMaxAge(header: string): number | undefined {
+  const match = /max-age=(\d+)/i.exec(header);
+  return match ? Number(match[1]) : undefined;
+}
+
+function resolveSameOriginUrls(baseUrl: string, values: string[], limit: number): string[] {
+  const base = new URL(baseUrl);
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!value || value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("mailto:")) continue;
+    try {
+      const resolved = new URL(value, base);
+      resolved.hash = "";
+      if (resolved.origin === base.origin) seen.add(resolved.toString());
+      if (seen.size >= limit) break;
+    } catch {
+      // Ignore malformed URLs; specific HTML/link checks surface user-facing issues.
+    }
+  }
+  return [...seen];
 }
 
 export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
@@ -158,7 +201,51 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
   const canonical = $('link[rel="canonical"]').attr("href") ?? "";
   const robotsMeta = $('meta[name="robots"]').attr("content") ?? "";
   const ogTitle = $('meta[property="og:title"]').attr("content") ?? "";
+  const ogDescription = $('meta[property="og:description"]').attr("content") ?? "";
+  const ogImage = $('meta[property="og:image"]').attr("content") ?? "";
+  const ogUrl = $('meta[property="og:url"]').attr("content") ?? "";
+  const twitterCard = $('meta[name="twitter:card"]').attr("content") ?? "";
   const structuredDataCount = $('script[type="application/ld+json"]').length;
+  const duplicateIds = $("*[id]")
+    .toArray()
+    .map((node) => $(node).attr("id") ?? "")
+    .filter((value, index, array) => value && array.indexOf(value) !== index);
+  const missingAriaReferences = $("[aria-labelledby],[aria-describedby]")
+    .toArray()
+    .flatMap((node) => [$(node).attr("aria-labelledby"), $(node).attr("aria-describedby")])
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(/\s+/))
+    .filter((ref) => ref && $(`#${ref}`).length === 0);
+  const unsafeBlankTargets = $('a[target="_blank"]')
+    .toArray()
+    .filter((node) => {
+      const rel = ($(node).attr("rel") ?? "").toLowerCase();
+      return !rel.includes("noopener") || !rel.includes("noreferrer");
+    });
+  const javascriptLinks = $("a[href]")
+    .toArray()
+    .filter((node) => ($(node).attr("href") ?? "").trim().toLowerCase().startsWith("javascript:"));
+  const brokenHashLinks = $("a[href^='#']")
+    .toArray()
+    .filter((node) => {
+      const hash = ($(node).attr("href") ?? "").slice(1);
+      return hash && $(`#${hash}`).length === 0;
+    });
+  const assetUrls = resolveSameOriginUrls(
+    page.url,
+    [
+      ...$("script[src]")
+        .toArray()
+        .map((node) => $(node).attr("src") ?? ""),
+      ...$('link[rel="stylesheet"][href],link[rel="preload"][href],link[rel="icon"][href],link[rel="apple-touch-icon"][href]')
+        .toArray()
+        .map((node) => $(node).attr("href") ?? ""),
+      ...$("img[src],iframe[src]")
+        .toArray()
+        .map((node) => $(node).attr("src") ?? ""),
+    ],
+    12,
+  );
   const formControlsMissingLabels = $("input,select,textarea")
     .toArray()
     .filter((node) => {
@@ -175,6 +262,8 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
   metrics.push(metric("technical", "http_status", "HTTP status", page.status));
   metrics.push(metric("technical", "html_size", "HTML size", Math.round(page.bytes / 1024), "KB"));
   metrics.push(metric("performance", "response_time", "Initial response", page.durationMs, "ms"));
+  metrics.push(metric("technical", "redirect_hops", "Redirect hops", page.redirectChain.length));
+  metrics.push(metric("performance", "content_encoding", "HTML content encoding", page.headers.get("content-encoding") ?? "none"));
   metrics.push(metric("performance", "resource_count", "Page resource references", resourceCount));
   metrics.push(metric("seo", "internal_links_seen", "Internal links detected", sameOriginInternalLinks(page.url, allLinks, 100).length));
   metrics.push(metric("accessibility", "images_missing_alt", "Images missing alt text", imagesMissingAlt.length));
@@ -201,6 +290,22 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `HTTP ${page.status}`,
         "Visitors may see an error page instead of the intended content.",
         "Confirm the URL, routing rules, and access controls for this page.",
+      ),
+    );
+  }
+
+  if (page.redirectChain.length >= 3) {
+    findings.push(
+      finding(
+        "technical",
+        "medium",
+        "Redirect chain is longer than expected",
+        "The page required several redirects before reaching the final URL.",
+        `${page.redirectChain.length} redirect hop(s)`,
+        "Long redirect chains add latency and can make canonical URL behavior harder to reason about.",
+        "Reduce redirects and point links directly to the canonical final URL.",
+        "failed",
+        page.redirectChain.join("\n"),
       ),
     );
   }
@@ -241,6 +346,19 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${Math.round(page.bytes / 1024)}KB HTML`,
         "Large HTML increases network and parsing cost.",
         "Remove duplicated markup, defer non-critical content, and keep initial HTML lean.",
+      ),
+    );
+  }
+  if (page.bytes > 100_000 && !["br", "gzip", "zstd"].includes((page.headers.get("content-encoding") ?? "").toLowerCase())) {
+    findings.push(
+      finding(
+        "performance",
+        "medium",
+        "HTML response is not compressed",
+        "The page HTML is large enough that compression should normally be enabled.",
+        `${Math.round(page.bytes / 1024)}KB HTML with no content-encoding`,
+        "Compression reduces transfer size and improves load time on slower connections.",
+        "Enable Brotli, gzip, or zstd compression at the server or CDN layer.",
       ),
     );
   }
@@ -296,6 +414,18 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         "Add a short, page-specific description that explains the value of the page.",
       ),
     );
+  } else if (description.length < 50 || description.length > 170 || description.toLowerCase() === title.toLowerCase()) {
+    findings.push(
+      finding(
+        "seo",
+        description.toLowerCase() === title.toLowerCase() ? "medium" : "low",
+        "Meta description quality needs review",
+        "The meta description exists but may not work well as a search snippet.",
+        `${description.length} characters`,
+        "Weak snippets can reduce clarity when the page appears in search results.",
+        "Write a specific description that is distinct from the title and usually 50 to 170 characters.",
+      ),
+    );
   }
   if (h1s.length !== 1) {
     findings.push(
@@ -322,15 +452,57 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         "Add a canonical URL that points to the preferred page address.",
       ),
     );
+  } else {
+    try {
+      const canonicalUrl = new URL(canonical, page.url);
+      if (!["http:", "https:"].includes(canonicalUrl.protocol) || canonicalUrl.hash) {
+        throw new Error("Canonical must be HTTP/HTTPS and should not include fragments.");
+      }
+      if (canonicalUrl.hostname !== new URL(page.url).hostname) {
+        findings.push(
+          finding(
+            "seo",
+            "low",
+            "Canonical points to a different host",
+            "The canonical URL points away from the audited host.",
+            canonicalUrl.toString(),
+            "Cross-domain canonicals can be correct, but accidental values can shift indexing signals elsewhere.",
+            "Confirm the canonical URL is intentional and points to the preferred public page.",
+          ),
+        );
+      }
+    } catch (error) {
+      findings.push(
+        finding(
+          "seo",
+          "medium",
+          "Canonical URL is invalid",
+          "The page declares a canonical URL that could not be parsed safely.",
+          canonical,
+          "Invalid canonical metadata can confuse search engines.",
+          "Use an absolute or resolvable HTTP/HTTPS canonical URL with no fragment.",
+          "failed",
+          error instanceof Error ? error.message : undefined,
+        ),
+      );
+    }
   }
-  if (!ogTitle) {
+  if (!ogTitle || !ogDescription || !ogImage || !ogUrl || !twitterCard) {
     findings.push(
       finding(
         "seo",
         "low",
         "Social preview metadata is incomplete",
-        "The page does not include a basic Open Graph title.",
-        "Missing og:title",
+        "The page is missing one or more common Open Graph/Twitter preview tags.",
+        [
+          !ogTitle ? "og:title" : "",
+          !ogDescription ? "og:description" : "",
+          !ogImage ? "og:image" : "",
+          !ogUrl ? "og:url" : "",
+          !twitterCard ? "twitter:card" : "",
+        ]
+          .filter(Boolean)
+          .join(", "),
         "Shared links may look weaker in social and messaging previews.",
         "Add Open Graph title, description, image, and URL metadata.",
       ),
@@ -348,6 +520,30 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         "Add relevant schema only when it accurately describes the page.",
       ),
     );
+  } else {
+    const invalidJsonLd = $('script[type="application/ld+json"]')
+      .toArray()
+      .filter((node) => {
+        try {
+          JSON.parse($(node).text());
+          return false;
+        } catch {
+          return true;
+        }
+      }).length;
+    if (invalidJsonLd > 0) {
+      findings.push(
+        finding(
+          "seo",
+          "medium",
+          "Structured data contains invalid JSON",
+          "One or more JSON-LD blocks could not be parsed.",
+          `${invalidJsonLd} invalid JSON-LD block(s)`,
+          "Invalid structured data is ignored and may prevent rich result eligibility.",
+          "Validate JSON-LD syntax and remove comments, trailing commas, or malformed escaping.",
+        ),
+      );
+    }
   }
 
   if (imagesMissingAlt.length > 0) {
@@ -386,6 +582,45 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `${unnamedButtons.length} unnamed interactive element(s)`,
         "Keyboard and screen reader users may not understand the action.",
         "Add visible text, aria-labels, or titles that describe each action.",
+      ),
+    );
+  }
+  if (!$("html").attr("lang")) {
+    findings.push(
+      finding(
+        "accessibility",
+        "medium",
+        "Document language is missing",
+        "The initial HTML does not set a language on the html element.",
+        "Missing html[lang]",
+        "Assistive technologies may use the wrong pronunciation rules.",
+        "Set the primary page language, for example <html lang=\"en\">.",
+      ),
+    );
+  }
+  if ($("main").length === 0) {
+    findings.push(
+      finding(
+        "accessibility",
+        "low",
+        "Main landmark is missing in initial HTML",
+        "The initial HTML does not include a main landmark.",
+        "No <main> element found",
+        "Landmarks help keyboard and screen reader users jump to the primary content.",
+        "Wrap the primary page content in a semantic <main> element.",
+      ),
+    );
+  }
+  if (duplicateIds.length > 0 || missingAriaReferences.length > 0) {
+    findings.push(
+      finding(
+        "accessibility",
+        "medium",
+        "ARIA or ID references need review",
+        "The page has duplicate IDs or ARIA references that point to missing elements.",
+        `${duplicateIds.length} duplicate ID(s), ${missingAriaReferences.length} missing ARIA reference(s)`,
+        "Broken references can make labels and descriptions unavailable to assistive technology.",
+        "Ensure IDs are unique and aria-labelledby/aria-describedby values point to existing elements.",
       ),
     );
   }
@@ -457,6 +692,62 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
       );
     }
   }
+  const hsts = headers.get("strict-transport-security") ?? "";
+  const csp = headers.get("content-security-policy") ?? "";
+  const xFrame = (headers.get("x-frame-options") ?? "").toLowerCase();
+  const referrerPolicy = (headers.get("referrer-policy") ?? "").toLowerCase();
+  if (hsts && (parseMaxAge(hsts) ?? 0) < 15_552_000) {
+    findings.push(
+      finding(
+        "security",
+        "low",
+        "HSTS max-age is short",
+        "The HSTS header exists but uses a short max-age value.",
+        hsts,
+        "Short HSTS windows reduce protection against protocol downgrade after the value expires.",
+        "Use a longer max-age after confirming HTTPS is stable across the domain.",
+      ),
+    );
+  }
+  if (csp && /'unsafe-inline'|'unsafe-eval'|\*/i.test(csp)) {
+    findings.push(
+      finding(
+        "security",
+        "low",
+        "Content Security Policy is permissive",
+        "The CSP includes unsafe or wildcard directives.",
+        csp.slice(0, 220),
+        "Permissive policies reduce the protection CSP can provide against script injection.",
+        "Tighten script/style directives and use nonces or hashes where practical.",
+      ),
+    );
+  }
+  if (xFrame && !["deny", "sameorigin"].includes(xFrame)) {
+    findings.push(
+      finding(
+        "security",
+        "low",
+        "Frame protection header value is unusual",
+        "X-Frame-Options is present but does not use DENY or SAMEORIGIN.",
+        xFrame,
+        "Unexpected values may not be honored consistently by browsers.",
+        "Use DENY or SAMEORIGIN, or enforce frame-ancestors in CSP.",
+      ),
+    );
+  }
+  if (referrerPolicy === "unsafe-url") {
+    findings.push(
+      finding(
+        "security",
+        "medium",
+        "Referrer Policy leaks full URLs",
+        "The page uses the unsafe-url referrer policy.",
+        referrerPolicy,
+        "Full URLs, including paths and query strings, may be sent to other origins.",
+        "Use a stricter policy such as strict-origin-when-cross-origin.",
+      ),
+    );
+  }
 
   if (!viewport) {
     findings.push(
@@ -483,12 +774,27 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
       ),
     );
   }
+  if (/user-scalable\s*=\s*no|maximum-scale\s*=\s*1/i.test(viewport)) {
+    findings.push(
+      finding(
+        "mobile",
+        "medium",
+        "Mobile zoom may be restricted",
+        "The viewport configuration appears to limit user zoom.",
+        viewport,
+        "Users with low vision may need pinch zoom to read content comfortably.",
+        "Avoid disabling zoom or setting maximum-scale=1.",
+      ),
+    );
+  }
 
   const robotsUrl = new URL("/robots.txt", page.url).toString();
   const sitemapUrl = new URL("/sitemap.xml", page.url).toString();
-  const [robotsStatus, sitemapStatus] = await Promise.all([checkEndpoint(robotsUrl), checkEndpoint(sitemapUrl)]);
-  metrics.push(metric("seo", "robots_status", "robots.txt status", robotsStatus ?? "unreachable"));
-  metrics.push(metric("seo", "sitemap_status", "sitemap.xml status", sitemapStatus ?? "unreachable"));
+  const [robotsResult, sitemapResult] = await Promise.all([fetchTextCapped(robotsUrl), fetchTextCapped(sitemapUrl)]);
+  metrics.push(metric("seo", "robots_status", "robots.txt status", robotsResult.status ?? "unreachable"));
+  metrics.push(metric("seo", "sitemap_status", "sitemap.xml status", sitemapResult.status ?? "unreachable"));
+  const robotsStatus = robotsResult.status;
+  const sitemapStatus = sitemapResult.status;
   if (!robotsStatus || robotsStatus >= 400) {
     findings.push(
       finding(
@@ -512,6 +818,120 @@ export async function runPageAudit(inputUrl: string): Promise<AuditResult> {
         `Status ${sitemapStatus ?? "unreachable"}`,
         "Search engines may discover pages less efficiently.",
         "Publish a sitemap and reference it from robots.txt.",
+      ),
+    );
+  }
+  if (robotsStatus && robotsStatus < 400 && robotsResult.text) {
+    if (/^\s*disallow:\s*\/\s*$/im.test(robotsResult.text)) {
+      findings.push(
+        finding(
+          "seo",
+          "medium",
+          "robots.txt may block the full site",
+          "robots.txt contains a global Disallow: / rule.",
+          "Disallow: /",
+          "If this applies to all user agents, search engines may avoid crawling the site.",
+          "Confirm robots.txt rules are intentional for production pages.",
+        ),
+      );
+    }
+    if (!/^\s*sitemap:/im.test(robotsResult.text)) {
+      findings.push(
+        finding(
+          "seo",
+          "low",
+          "robots.txt does not reference a sitemap",
+          "robots.txt is reachable but does not include a Sitemap directive.",
+          "No Sitemap directive found",
+          "A sitemap reference can help crawlers discover canonical sitemap locations.",
+          "Add a Sitemap directive when a sitemap is available.",
+        ),
+      );
+    }
+  }
+  if (sitemapStatus && sitemapStatus < 400 && sitemapResult.text && !/<(urlset|sitemapindex)[\s>]/i.test(sitemapResult.text)) {
+    findings.push(
+      finding(
+        "seo",
+        "medium",
+        "sitemap.xml content does not look like a sitemap",
+        "The sitemap URL responded successfully, but the body does not look like a sitemap index or URL set.",
+        "Missing urlset/sitemapindex root",
+        "Search engines may ignore malformed sitemap content.",
+        "Return valid XML sitemap content or point robots.txt to the correct sitemap.",
+      ),
+    );
+  }
+
+  if (unsafeBlankTargets.length > 0 || javascriptLinks.length > 0 || brokenHashLinks.length > 0) {
+    findings.push(
+      finding(
+        "technical",
+        unsafeBlankTargets.length > 0 ? "medium" : "low",
+        "Link hygiene needs review",
+        "The page has unsafe blank-target links, javascript links, or hash links without matching targets.",
+        `${unsafeBlankTargets.length} unsafe blank target(s), ${javascriptLinks.length} javascript link(s), ${brokenHashLinks.length} broken hash link(s)`,
+        "Weak link hygiene can create security, accessibility, and navigation issues.",
+        "Add rel=\"noopener noreferrer\" to new-tab links, avoid javascript: links, and ensure hash targets exist.",
+      ),
+    );
+  }
+
+  if (page.url.startsWith("https://")) {
+    const insecureAssets = [
+      ...$("[src^='http://']")
+        .toArray()
+        .map((node) => $(node).attr("src") ?? ""),
+      ...$("[href^='http://']")
+        .toArray()
+        .map((node) => $(node).attr("href") ?? ""),
+    ];
+    if (insecureAssets.length > 0) {
+      findings.push(
+        finding(
+          "security",
+          "high",
+          "Potential mixed content detected",
+          "The HTTPS page references HTTP resources in the initial HTML.",
+          `${insecureAssets.length} insecure resource reference(s)`,
+          "Mixed content can be blocked by browsers or weaken page security.",
+          "Serve all page resources over HTTPS.",
+          "failed",
+          insecureAssets.slice(0, 10).join("\n"),
+        ),
+      );
+    }
+  }
+
+  if (!/^<!doctype html>/i.test(page.html.trim()) || $("title").length > 1 || $('meta[name="viewport"]').length > 1) {
+    findings.push(
+      finding(
+        "technical",
+        "low",
+        "HTML document structure needs review",
+        "The initial HTML is missing a standard doctype or has duplicate key metadata.",
+        `doctype=${/^<!doctype html>/i.test(page.html.trim())}, titles=${$("title").length}, viewports=${$('meta[name="viewport"]').length}`,
+        "Malformed or duplicated document metadata can create inconsistent browser behavior.",
+        "Use one doctype, one title, and one viewport declaration in the initial HTML.",
+      ),
+    );
+  }
+
+  const assetResults = await checkLinks(assetUrls);
+  const brokenAssets = assetResults.filter((result) => !result.status || result.status >= 400);
+  metrics.push(metric("technical", "checked_assets", "Same-origin assets checked", assetResults.length));
+  if (brokenAssets.length > 0) {
+    findings.push(
+      finding(
+        "technical",
+        "medium",
+        "Some same-origin assets failed",
+        "A limited same-origin asset check found scripts, styles, images, or icons that failed.",
+        `${brokenAssets.length} of ${assetResults.length} checked assets failed`,
+        "Broken assets can harm rendering, tracking, interaction, or brand presentation.",
+        "Fix, remove, or redirect failing asset URLs.",
+        "failed",
+        brokenAssets.map((item) => `${item.status ?? "unreachable"} ${item.url}`).join("\n"),
       ),
     );
   }

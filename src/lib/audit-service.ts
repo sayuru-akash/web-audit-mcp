@@ -4,7 +4,7 @@ import { runPageAudit } from "@/lib/audit-engine";
 import { normalizeWebsiteUrl } from "@/lib/url";
 
 export async function addWebsiteForUser(userId: string, url: string, displayName?: string): Promise<Website> {
-  const normalized = normalizeWebsiteUrl(url);
+const normalized = normalizeWebsiteUrl(url);
   const allowed = await checkRateLimit(`add-website:${userId}`, 20, 60 * 60 * 1000);
   if (!allowed) throw new Error("Too many website changes. Please try again later.");
   return updateStore((data) => {
@@ -34,6 +34,8 @@ export async function addWebsiteForUser(userId: string, url: string, displayName
     return website;
   });
 }
+
+const STALE_AUDIT_MS = 30 * 60 * 1000;
 
 function nextRunAt(frequency: ScheduleFrequency, from = new Date()): string | undefined {
   if (frequency === "manual") return undefined;
@@ -194,6 +196,7 @@ export async function processAudit(auditId: string, source: "manual" | "schedule
 }
 
 export async function processQueuedAudits(limit = 3): Promise<AuditRun[]> {
+  await recoverStaleAudits();
   const data = await readStore();
   const queued = data.audits
     .filter((audit) => audit.status === "queued")
@@ -204,6 +207,71 @@ export async function processQueuedAudits(limit = 3): Promise<AuditRun[]> {
     processed.push(await processAudit(audit.id));
   }
   return processed;
+}
+
+export async function recoverStaleAudits(): Promise<number> {
+  return updateStore((data) => {
+    const cutoff = Date.now() - STALE_AUDIT_MS;
+    let recovered = 0;
+    for (const audit of data.audits) {
+      const activeAt = Date.parse(audit.startedAt ?? audit.updatedAt ?? audit.createdAt);
+      if ((audit.status === "running" || audit.status === "queued") && activeAt < cutoff) {
+        audit.status = "failed";
+        audit.failureReason = "Audit was marked stale after the worker did not finish in time.";
+        audit.completedAt = nowIso();
+        audit.updatedAt = audit.completedAt;
+        recovered += 1;
+      }
+    }
+    return recovered;
+  });
+}
+
+export async function getOperationalHealth() {
+  const data = await readStore();
+  const now = Date.now();
+  const queued = data.audits.filter((audit) => audit.status === "queued");
+  const running = data.audits.filter((audit) => audit.status === "running");
+  const failed = data.audits.filter((audit) => audit.status === "failed");
+  const stale = [...queued, ...running].filter((audit) => {
+    const activeAt = Date.parse(audit.startedAt ?? audit.updatedAt ?? audit.createdAt);
+    return now - activeAt > STALE_AUDIT_MS;
+  });
+  const failedByReason = failed.reduce<Record<string, number>>((acc, audit) => {
+    const reason = audit.failureReason ?? "Unknown";
+    acc[reason] = (acc[reason] ?? 0) + 1;
+    return acc;
+  }, {});
+  const scheduledOverdue = data.websites.filter(
+    (website) =>
+      website.scheduleEnabled &&
+      website.nextScheduledRunAt &&
+      Date.parse(website.nextScheduledRunAt) < now,
+  );
+  return {
+    totals: {
+      users: data.users.length,
+      websites: data.websites.length,
+      audits: data.audits.length,
+      queued: queued.length,
+      running: running.length,
+      completed: data.audits.filter((audit) => audit.status === "completed").length,
+      failed: failed.length,
+      stale: stale.length,
+      scheduledOverdue: scheduledOverdue.length,
+    },
+    oldestQueuedAgeMs: queued[0] ? now - Date.parse(queued.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0].createdAt) : 0,
+    failedByReason,
+    recentFailures: failed
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 10)
+      .map((audit) => ({
+        id: audit.id,
+        requestedUrl: audit.requestedUrl,
+        reason: audit.failureReason,
+        updatedAt: audit.updatedAt,
+      })),
+  };
 }
 
 export async function updateSchedule(

@@ -122,6 +122,7 @@ export type PasswordResetToken = {
 };
 
 export type StoreData = {
+  version: number;
   users: User[];
   sessions: Session[];
   websites: Website[];

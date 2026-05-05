@@ -40,6 +40,12 @@ server.registerTool(
     title: "Validate audit URL",
     description: "Normalize a URL and confirm it is safe for Web Audit to scan. Blocks localhost and private networks.",
     inputSchema: { url: z.string().describe("HTTP or HTTPS website URL to validate.") },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
   },
   async ({ url }) => {
     const safe = await assertPublicUrl(url);
@@ -56,6 +62,12 @@ server.registerTool(
     title: "Run page audit",
     description: "Run a safe non-invasive page audit and return scores, metrics, and prioritized findings.",
     inputSchema: { url: z.string().describe("Public HTTP or HTTPS URL to audit.") },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
   async ({ url }) => {
     const result = await runPageAudit(url);
@@ -75,6 +87,12 @@ server.registerTool(
       url: z.string().describe("Public HTTP or HTTPS URL to audit."),
       displayName: z.string().optional().describe("Optional website name."),
     },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
   async ({ url, displayName }) => {
     await ensureAgentUser();
@@ -93,6 +111,12 @@ server.registerTool(
     title: "Get audit report",
     description: "Fetch a persisted audit report with findings and metrics.",
     inputSchema: { auditId: z.string().describe("Audit run id.") },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
   async ({ auditId }) => {
     const data = await readStore();

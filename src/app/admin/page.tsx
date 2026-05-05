@@ -1,45 +1,57 @@
 import { AppShell } from "@/components/app-shell";
 import { requireAdmin } from "@/lib/auth";
-import { readStore } from "@/lib/store";
+import { getOperationalHealth } from "@/lib/audit-service";
+import { getStoreHealth } from "@/lib/store";
 
 export default async function AdminPage() {
   const user = await requireAdmin();
-  const data = await readStore();
-  const failed = data.audits.filter((audit) => audit.status === "failed");
-  const running = data.audits.filter((audit) => audit.status === "running" || audit.status === "queued");
-  const completed = data.audits.filter((audit) => audit.status === "completed");
-  const avgRuntime = completed.length
-    ? Math.round(completed.reduce((sum, audit) => sum + (audit.durationMs ?? 0), 0) / completed.length / 1000)
-    : 0;
+  const health = await getOperationalHealth();
+  const store = await getStoreHealth();
   return (
     <AppShell user={user} title="System health" subtitle="Minimal operator view for queue and audit outcomes.">
       <div className="grid cols-4">
         <div className="card">
           <div className="metric">Users</div>
-          <div className="big">{data.users.length}</div>
+          <div className="big">{health.totals.users}</div>
         </div>
         <div className="card">
           <div className="metric">Websites</div>
-          <div className="big">{data.websites.length}</div>
+          <div className="big">{health.totals.websites}</div>
         </div>
         <div className="card">
           <div className="metric">Open jobs</div>
-          <div className="big">{running.length}</div>
+          <div className="big">{health.totals.queued + health.totals.running}</div>
         </div>
         <div className="card">
-          <div className="metric">Avg runtime</div>
-          <div className="big">{avgRuntime}s</div>
+          <div className="metric">Stale jobs</div>
+          <div className="big">{health.totals.stale}</div>
         </div>
+      </div>
+      <div style={{ height: 18 }} />
+      <div className="grid cols-2">
+        <section className="card">
+          <h2>Queue health</h2>
+          <p className="muted">Queued: {health.totals.queued}</p>
+          <p className="muted">Running: {health.totals.running}</p>
+          <p className="muted">Oldest queued age: {Math.round(health.oldestQueuedAgeMs / 1000)}s</p>
+          <p className="muted">Scheduled overdue: {health.totals.scheduledOverdue}</p>
+        </section>
+        <section className="card">
+          <h2>Store health</h2>
+          <p className="muted">Path: {store.path}</p>
+          <p className="muted">Size: {store.sizeBytes ?? 0} bytes</p>
+          <p className="muted">Updated: {store.updatedAt ?? "Not created yet"}</p>
+        </section>
       </div>
       <div style={{ height: 18 }} />
       <div className="card">
         <h2>Failed audits</h2>
         <table className="table">
           <tbody>
-            {failed.slice(0, 20).map((audit) => (
+            {health.recentFailures.map((audit) => (
               <tr key={audit.id}>
                 <td>{audit.requestedUrl}</td>
-                <td>{audit.failureReason}</td>
+                <td>{audit.reason}</td>
               </tr>
             ))}
           </tbody>

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AuditRun, Finding, Metric, Notification, ShareLink, StoreData, User, Website } from "@/lib/types";
 
 const DATA_FILE = path.join(process.cwd(), "data", "webaudit.json");
+const STORE_VERSION = 1;
 let storeQueue: Promise<unknown> = Promise.resolve();
 
 const emptyStore = (): StoreData => ({
+  version: STORE_VERSION,
   users: [],
   sessions: [],
   websites: [],
@@ -25,16 +27,24 @@ export const id = () => randomUUID();
 export async function readStore(): Promise<StoreData> {
   try {
     const raw = await readFile(DATA_FILE, "utf8");
-    return { ...emptyStore(), ...JSON.parse(raw) } as StoreData;
+    const parsed = { ...emptyStore(), ...JSON.parse(raw) } as StoreData;
+    parsed.version = parsed.version ?? STORE_VERSION;
+    return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyStore();
-    throw error;
+    throw new Error(`Unable to read Web Audit store at ${DATA_FILE}: ${(error as Error).message}`);
   }
 }
 
 export async function writeStore(data: StoreData): Promise<void> {
   await mkdir(path.dirname(DATA_FILE), { recursive: true });
+  data.version = STORE_VERSION;
   const tmp = `${DATA_FILE}.${process.pid}.tmp`;
+  try {
+    await rename(DATA_FILE, `${DATA_FILE}.bak`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   await rename(tmp, DATA_FILE);
 }
@@ -111,6 +121,35 @@ export async function checkRateLimit(key: string, limit: number, windowMs: numbe
     current.count += 1;
     return true;
   });
+}
+
+export async function pruneExpiredSecurityRecords(): Promise<void> {
+  await updateStore((data) => {
+    const now = Date.now();
+    data.sessions = data.sessions.filter((session) => Date.parse(session.expiresAt) > now);
+    data.passwordResetTokens = data.passwordResetTokens.filter(
+      (token) => !token.usedAt && Date.parse(token.expiresAt) > now,
+    );
+    data.rateLimits = data.rateLimits.filter((entry) => Date.parse(entry.resetAt) > now);
+  });
+}
+
+export async function getStoreHealth() {
+  try {
+    const file = await stat(DATA_FILE);
+    return {
+      ok: true,
+      path: DATA_FILE,
+      sizeBytes: file.size,
+      updatedAt: file.mtime.toISOString(),
+      version: STORE_VERSION,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: true, path: DATA_FILE, sizeBytes: 0, updatedAt: undefined, version: STORE_VERSION };
+    }
+    return { ok: false, path: DATA_FILE, error: (error as Error).message, version: STORE_VERSION };
+  }
 }
 
 export function addNotification(

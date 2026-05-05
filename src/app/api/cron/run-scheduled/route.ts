@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { dueScheduledWebsites, processQueuedAudits, runAuditForWebsite } from "@/lib/audit-service";
-import { checkRateLimit } from "@/lib/store";
+import { dueScheduledWebsites, processQueuedAudits, recoverStaleAudits, runAuditForWebsite } from "@/lib/audit-service";
+import { checkRateLimit, pruneExpiredSecurityRecords } from "@/lib/store";
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -12,6 +12,8 @@ export async function POST(request: Request) {
   }
   const allowed = await checkRateLimit("cron:run-scheduled", 30, 60 * 60 * 1000);
   if (!allowed) return NextResponse.json({ error: "Cron rate limit reached." }, { status: 429 });
+  await pruneExpiredSecurityRecords();
+  const recoveredStale = await recoverStaleAudits();
   const due = await dueScheduledWebsites();
   const results = [];
   for (const website of due) {
@@ -21,6 +23,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     scheduled: results.length,
     processedQueued: queued.length,
+    recoveredStale,
     audits: [...results, ...queued].map((audit) => audit.id),
   });
 }

@@ -28,6 +28,10 @@ describe("store", () => {
             email: `user-${index}@example.com`,
             passwordHash: "hash",
             displayName: `User ${index}`,
+            notifyOnAuditCompleted: true,
+            notifyOnAuditFailed: true,
+            notifyOnCriticalIssue: true,
+            notifyOnScoreDrop: true,
             createdAt: ts,
             updatedAt: ts,
           });

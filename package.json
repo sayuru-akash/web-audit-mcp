@@ -12,16 +12,20 @@
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "mcp": "tsx src/mcp/server.ts",
+    "mcp:smoke": "tsx scripts/smoke-mcp-client.ts",
     "audit:url": "tsx scripts/audit-url.ts",
-    "worker:once": "tsx scripts/worker-once.ts"
+    "worker:once": "tsx scripts/worker-once.ts",
+    "db:schema:check": "tsx scripts/check-db-schema.ts"
   },
   "overrides": {
     "postcss": "^8.5.10"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@neondatabase/serverless": "^1.1.0",
     "cheerio": "^1.2.0",
     "date-fns": "^4.1.0",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.14.0",
     "next": "^16.2.4",
     "pdfkit": "^0.18.0",
