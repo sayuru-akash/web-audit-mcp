@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { findUserBySession, id, nowIso, updateStore } from "@/lib/store";
+import { getAdminEmails, isDevResetTokenDisplayEnabled, isProduction } from "@/lib/runtime-config";
 import type { User } from "@/lib/types";
 
 export const sessionCookieName = "web_audit_session";
@@ -71,7 +72,7 @@ export async function createPasswordResetToken(email: string): Promise<string | 
       createdAt,
     });
   });
-  return process.env.WEB_AUDIT_DEV_RESET_TOKENS === "true" ? token : undefined;
+  return isDevResetTokenDisplayEnabled() ? token : undefined;
 }
 
 export async function resetPasswordWithToken(token: string, password: string): Promise<void> {
@@ -144,14 +145,11 @@ export async function requireUser(): Promise<User> {
 
 export async function requireAdmin(): Promise<User> {
   const user = await requireUser();
-  const adminEmails = (process.env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (adminEmails.length === 0 && process.env.NODE_ENV !== "development") {
+  const adminEmails = getAdminEmails();
+  if (adminEmails.length === 0 && isProduction()) {
     throw new Error("Admin access is not configured.");
   }
-  if (process.env.NODE_ENV === "development" && adminEmails.length === 0) return user;
+  if (!isProduction() && adminEmails.length === 0) return user;
   if (!adminEmails.includes(user.email.toLowerCase())) {
     throw new Error("You do not have access to this admin area.");
   }

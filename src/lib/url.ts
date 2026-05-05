@@ -3,15 +3,24 @@ import { lookup } from "node:dns/promises";
 import { z } from "zod";
 
 const PRIVATE_V4 = [
+  /^0\./,
   /^10\./,
   /^127\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
   /^169\.254\./,
   /^172\.(1[6-9]|2\d|3[0-1])\./,
+  /^192\.0\.0\./,
+  /^192\.0\.2\./,
   /^192\.168\./,
-  /^0\./,
+  /^198\.(1[89])\./,
+  /^198\.51\.100\./,
+  /^203\.0\.113\./,
+  /^(22[4-9]|23\d)\./,
+  /^240\./,
+  /^255\.255\.255\.255$/,
 ];
 
-const BLOCKED_HOSTS = new Set(["localhost", "0.0.0.0", "::1"]);
+const BLOCKED_HOSTS = new Set(["localhost", "0.0.0.0", "::", "::1"]);
 
 export const websiteUrlSchema = z
   .string()
@@ -57,7 +66,19 @@ export function isPrivateIp(address: string): boolean {
   if (family === 4) return PRIVATE_V4.some((pattern) => pattern.test(address));
   if (family === 6) {
     const lower = address.toLowerCase();
-    return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80:");
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateIp(mapped[1]);
+    return (
+      lower === "::" ||
+      lower === "::1" ||
+      lower.startsWith("fc") ||
+      lower.startsWith("fd") ||
+      lower.startsWith("fe80:") ||
+      lower.startsWith("ff") ||
+      lower.startsWith("2001:db8") ||
+      lower.startsWith("2001:2") ||
+      lower.startsWith("2001:10")
+    );
   }
   return false;
 }

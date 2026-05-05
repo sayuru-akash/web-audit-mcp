@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Search, X } from "lucide-react";
+import { Copy, ExternalLink, ImageOff, Search, X } from "lucide-react";
 import { useId, useState } from "react";
 import type { Finding } from "@/lib/types";
 
@@ -30,6 +30,37 @@ function evidenceUrls(finding: EvidenceFinding) {
 
 function isLikelyImageUrl(url: string) {
   return /\.(avif|gif|jpe?g|png|svg|webp)(\?|#|$)/i.test(url) || /\/image\/upload\//i.test(url);
+}
+
+function imageLabel(url: string) {
+  try {
+    const parsed = new URL(url);
+    return decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() ?? parsed.hostname);
+  } catch {
+    return "Referenced image";
+  }
+}
+
+function EvidenceImagePreview({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  const label = imageLabel(url);
+  return (
+    <a className={`evidence-image-card ${failed ? "failed" : ""}`} href={url} target="_blank" rel="noreferrer" title={url}>
+      {failed ? (
+        <span className="evidence-image-fallback">
+          <ImageOff size={18} />
+          Preview unavailable
+        </span>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={`/api/image-preview?url=${encodeURIComponent(url)}`} alt={`Referenced image preview: ${label}`} loading="lazy" onError={() => setFailed(true)} />
+      )}
+      <span className="evidence-image-label">
+        <ExternalLink size={12} />
+        {label}
+      </span>
+    </a>
+  );
 }
 
 export function FindingEvidenceButton({ finding }: { finding: EvidenceFinding }) {
@@ -127,10 +158,7 @@ export function FindingEvidenceButton({ finding }: { finding: EvidenceFinding })
                 <h3>Image previews</h3>
                 <div className="evidence-images">
                   {imageUrls.map((url) => (
-                    <a href={url} target="_blank" rel="noreferrer" key={url} title={url}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" loading="lazy" />
-                    </a>
+                    <EvidenceImagePreview url={url} key={url} />
                   ))}
                 </div>
               </section>

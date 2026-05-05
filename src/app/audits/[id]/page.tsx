@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { AuditStatusRefresh } from "@/components/audit-status-refresh";
@@ -7,7 +8,7 @@ import { FindingEvidenceButton } from "@/components/finding-evidence";
 import { ReportActions } from "@/components/report-actions";
 import { ScoreRing, ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { absoluteUrl, timeAgo } from "@/lib/format";
+import { absoluteUrlFromOrigin, requestOrigin, timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 import { activeShareFor, findingsFor, getUserDashboard, metricsFor } from "@/lib/store";
 
@@ -34,7 +35,8 @@ export default async function AuditReportPage({
   const findings = findingsFor(audit.id, data.findings);
   const metrics = metricsFor(audit.id, data.metrics);
   const share = activeShareFor(audit.id, data.shareLinks);
-  const shareUrl = share ? absoluteUrl(`/share/${share.token}`) : undefined;
+  const origin = requestOrigin(await headers());
+  const shareUrl = share ? absoluteUrlFromOrigin(`/share/${share.token}`, origin) : undefined;
   const confirmedFindings = findings.filter((finding) => finding.status === "failed");
   const passedFindings = findings.filter((finding) => finding.status === "passed");
   const topIssues = confirmedFindings.slice(0, 8);
@@ -42,7 +44,11 @@ export default async function AuditReportPage({
   return (
     <AppShell user={user} title="Audit report" subtitle={`${website.displayName} - ${audit.finalUrl ?? audit.requestedUrl}`}>
       <div className="report-toolbar">
-        <ReportActions auditId={audit.id} websiteDomain={website.domain} shareUrl={shareUrl} shareCreated={query.share === "created"} />
+        {audit.status === "completed" ? (
+          <ReportActions auditId={audit.id} websiteDomain={website.domain} shareUrl={shareUrl} shareCreated={query.share === "created"} />
+        ) : (
+          <span className="inline-status">Report actions unlock after completion.</span>
+        )}
         {share ? (
           <Link className="button" href={`/share/${share.token}`}>
             Shared report

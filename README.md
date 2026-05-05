@@ -56,6 +56,7 @@ Implemented product surfaces:
 - Audit execution with `queued`, `running`, `completed`, and `failed` states plus a local worker command for queued jobs.
 - Report pages with category scores, findings, metrics, evidence modals, referenced URLs, image previews, and recommendations.
 - PDF report generation with `@react-pdf/renderer`, a sparse client-ready layout, and in-browser export feedback.
+- Evidence image previews through a same-origin, SSRF-protected preview proxy with size, timeout, redirect, and content-type limits.
 - Private share links for completed audits with copy/open/revoke modal UX.
 - Light and dark mode with a persistent theme switch.
 - Paginated audit history and notification filters for unread and critical alerts.
@@ -274,7 +275,7 @@ npm run mcp
 | `NEXT_PUBLIC_APP_URL` | Recommended | `http://localhost:3000` | App links and deployment configuration | Set to the canonical origin for the environment. Do not leave a localhost value in preview/production. |
 | `CRON_SECRET` | Required outside development | `replace-for-production` | `POST /api/cron/run-scheduled` | Callers must send `Authorization: Bearer <CRON_SECRET>` when configured. Use a strong random value. |
 | `ADMIN_EMAILS` | Required outside development for admin access | `admin@example.com` | `/admin`, `/api/admin/health` | Comma-separated email allowlist. |
-| `WEB_AUDIT_DEV_RESET_TOKENS` | No | `false` | Forgot-password flow | When `true`, local reset tokens are displayed in the UI for development only. |
+| `WEB_AUDIT_DEV_RESET_TOKENS` | No | `false` | Forgot-password flow | Development-only reset-token display. Production blocks this even if it is accidentally set to `true`. |
 | `DATABASE_URL` | Optional, not consumed by current runtime | `postgresql://...` | Future Postgres/Drizzle adapter | Schema and SQL migration exist, but keep unset until the runtime adapter is enabled. See [docs/production.md](docs/production.md). |
 
 This repo does not currently require external database, queue, object storage, email, analytics, or payment provider environment variables. Add those only when the matching infrastructure is actually implemented.
@@ -320,6 +321,7 @@ API routes:
 - `POST /api/audit-url` runs a public rate-limited one-off page audit.
 - `GET /api/admin/health` returns private operational counts for admins only.
 - `GET /api/audits/[id]/pdf` exports a completed user-owned audit as PDF.
+- `GET /api/image-preview?url=...` renders evidence thumbnails through the same-origin preview proxy.
 - `POST /api/cron/run-scheduled` runs due scheduled audits and queued jobs, protected by `CRON_SECRET` outside development.
 - `GET /api/health` returns public liveness only.
 
@@ -415,6 +417,7 @@ Production security controls that must stay enabled:
 - Redirect-hop validation before each follow.
 - HTTP/HTTPS-only audits with credentials and URL fragments stripped.
 - Fetch timeout, HTML content-type check, and 2 MB HTML cap.
+- Evidence image-preview timeout, image content-type check, 2 MB cap, and redirect/private-network validation.
 - Public audit, user audit, website creation, and cron rate limits.
 - Admin allowlisting via `ADMIN_EMAILS`.
 - Cron authorization via `CRON_SECRET`.

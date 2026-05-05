@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { dueScheduledWebsites, processQueuedAudits, recoverStaleAudits, runAuditForWebsite } from "@/lib/audit-service";
+import { getCronSecret, isProduction } from "@/lib/runtime-config";
 import { checkRateLimit, pruneExpiredSecurityRecords } from "@/lib/store";
 
 export async function POST(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret && process.env.NODE_ENV !== "development") {
+  let secret: string;
+  try {
+    secret = getCronSecret();
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 503 });
+  }
+  if (!secret && isProduction()) {
     return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
   }
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {

@@ -20,7 +20,13 @@ describe("url safety", () => {
   it("detects private addresses", () => {
     expect(isPrivateIp("127.0.0.1")).toBe(true);
     expect(isPrivateIp("192.168.1.1")).toBe(true);
+    expect(isPrivateIp("100.64.0.1")).toBe(true);
+    expect(isPrivateIp("224.0.0.1")).toBe(true);
+    expect(isPrivateIp("::ffff:127.0.0.1")).toBe(true);
+    expect(isPrivateIp("fc00::1")).toBe(true);
+    expect(isPrivateIp("ff02::1")).toBe(true);
     expect(isPrivateIp("8.8.8.8")).toBe(false);
+    expect(isPrivateIp("2606:4700:4700::1111")).toBe(false);
   });
 
   it("keeps internal link checks same-origin and limited", () => {

@@ -19,7 +19,7 @@ Web Audit v1 is a page-audit product with selected website health checks. Keep p
 | `NEXT_PUBLIC_APP_URL` | Yes | Exact HTTPS app origin. Do not use localhost. |
 | `CRON_SECRET` | Yes | Strong random secret used as `Authorization: Bearer <secret>`. |
 | `ADMIN_EMAILS` | Yes | Comma-separated operator email allowlist. |
-| `WEB_AUDIT_DEV_RESET_TOKENS` | Yes | `false`. |
+| `WEB_AUDIT_DEV_RESET_TOKENS` | Yes | `false`; production blocks development token display if this is accidentally enabled. |
 | `DATABASE_URL` | No | Leave unset until the Postgres runtime adapter is enabled. |
 
 ## Local JSON Storage Limits
@@ -75,6 +75,7 @@ Keep these controls active in every production path:
 - Per-user website creation and audit execution are rate limited.
 - URL validation allows only HTTP/HTTPS, strips credentials/fragments, blocks localhost/private/internal targets, resolves DNS before execution, validates every redirect hop, caps redirects, and blocks unsafe final targets.
 - Audit fetches use timeout, HTML content validation, and a 2 MB HTML cap.
+- Evidence image previews use the same-origin proxy with public-URL validation, redirect limits, image content-type checks, timeout protection, and a 2 MB cap.
 - Sessions use HTTP-only cookies and secure cookies in production.
 - Password reset UI must not expose local development reset tokens in production.
 
@@ -114,6 +115,7 @@ API routes:
 - `POST /api/audit-url`
 - `GET /api/admin/health`
 - `GET /api/audits/[id]/pdf`
+- `GET /api/image-preview?url=...`
 - `POST /api/cron/run-scheduled`
 - `GET /api/health`
 
@@ -164,7 +166,8 @@ API routes:
    - run manual audit.
    - view audit report.
    - open evidence dialogs for top findings and all-findings rows.
-   - export PDF and inspect the summary plus evidence appendix.
+   - confirm image previews load through `/api/image-preview` or show the fallback state.
+   - export PDF and inspect the sparse cover, health page, and fixes page.
    - create share link, copy it from the modal, open it in a private window, and revoke it.
    - confirm reports show `needs_review` items separately from confirmed failed findings.
    - call `POST /api/cron/run-scheduled`.
