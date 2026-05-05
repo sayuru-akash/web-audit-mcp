@@ -1,4 +1,4 @@
-import PDFDocument from "pdfkit";
+import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
 import type { AuditRun, Finding, Metric, Website } from "@/lib/types";
 import { scoreLabel } from "@/lib/scoring";
 

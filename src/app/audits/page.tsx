@@ -1,15 +1,39 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
+import { paginate, Pagination } from "@/components/pagination";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { getUserDashboard } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
 
-export default async function AuditsPage() {
+export default async function AuditsPage({ searchParams }: { searchParams: Promise<{ page?: string; status?: string }> }) {
+  const query = await searchParams;
   const user = await requireUser();
   const { audits, websites } = await getUserDashboard(user.id);
+  const status = query.status && ["queued", "running", "completed", "failed", "cancelled"].includes(query.status) ? query.status : "";
+  const filteredAudits = status ? audits.filter((audit) => audit.status === status) : audits;
+  const page = Number(query.page ?? "1");
+  const { currentPage, totalPages, pageItems, totalItems } = paginate(filteredAudits, Number.isFinite(page) ? page : 1, 10);
   return (
     <AppShell user={user} title="Audits" subtitle="Saved report history across every website.">
+      <div className="list-toolbar">
+        <div>
+          <strong>{totalItems} report{totalItems === 1 ? "" : "s"}</strong>
+          <p className="muted">Filter by status and page through longer audit history.</p>
+        </div>
+        <div className="segmented" aria-label="Audit status filter">
+          {[
+            ["", "All"],
+            ["completed", "Completed"],
+            ["failed", "Failed"],
+            ["running", "Running"],
+          ].map(([value, label]) => (
+            <Link className={status === value ? "active" : ""} href={value ? `/audits?status=${value}` : "/audits"} key={value}>
+              {label}
+            </Link>
+          ))}
+        </div>
+      </div>
       <div className="card">
         <table className="table">
           <thead>
@@ -21,7 +45,7 @@ export default async function AuditsPage() {
             </tr>
           </thead>
           <tbody>
-            {audits.map((audit) => {
+            {pageItems.map((audit) => {
               const website = websites.find((item) => item.id === audit.websiteId);
               return (
                 <tr key={audit.id}>
@@ -43,7 +67,9 @@ export default async function AuditsPage() {
             })}
           </tbody>
         </table>
+        {pageItems.length === 0 ? <div className="empty-state">No reports match this filter.</div> : null}
       </div>
+      <Pagination currentPage={currentPage} totalPages={totalPages} basePath="/audits" params={{ status }} />
     </AppShell>
   );
 }

@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
-import { ShareButtons } from "@/components/forms";
+import { ReportActions } from "@/components/report-actions";
 import { ScoreRing, ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { absoluteUrl, timeAgo } from "@/lib/format";
 import { activeShareFor, findingsFor, getUserDashboard, metricsFor } from "@/lib/store";
 
-export default async function AuditReportPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AuditReportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ share?: string }>;
+}) {
   const { id } = await params;
+  const query = await searchParams;
   const user = await requireUser();
   const { data, websites, audits } = await getUserDashboard(user.id);
   const audit = audits.find((item) => item.id === id);
@@ -18,14 +25,12 @@ export default async function AuditReportPage({ params }: { params: Promise<{ id
   const findings = findingsFor(audit.id, data.findings);
   const metrics = metricsFor(audit.id, data.metrics);
   const share = activeShareFor(audit.id, data.shareLinks);
+  const shareUrl = share ? absoluteUrl(`/share/${share.token}`) : undefined;
   const topIssues = findings.filter((finding) => finding.status === "failed").slice(0, 8);
   return (
     <AppShell user={user} title="Audit report" subtitle={`${website.displayName} - ${audit.finalUrl ?? audit.requestedUrl}`}>
-      <div className="actions">
-        <Link className="button" href={`/api/audits/${audit.id}/pdf`}>
-          Export PDF
-        </Link>
-        <ShareButtons auditId={audit.id} enabled={Boolean(share)} />
+      <div className="report-toolbar">
+        <ReportActions auditId={audit.id} websiteDomain={website.domain} shareUrl={shareUrl} shareCreated={query.share === "created"} />
         {share ? (
           <Link className="button" href={`/share/${share.token}`}>
             Shared report
@@ -40,7 +45,7 @@ export default async function AuditReportPage({ params }: { params: Promise<{ id
           <p className="muted">
             {audit.status === "failed"
               ? audit.failureReason
-              : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}. Share URL: ${share ? absoluteUrl(`/share/${share.token}`) : "private"}`}
+              : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}. Share URL: ${shareUrl ?? "private"}`}
           </p>
         </div>
         <div className="card">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Activity, FileText, Globe2, Lock, ShieldCheck, TimerReset } from "lucide-react";
 import { AddWebsiteForm } from "@/components/forms";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { currentUser } from "@/lib/auth";
 
 export default async function HomePage() {
@@ -8,6 +9,20 @@ export default async function HomePage() {
   return (
     <>
       <main className="hero">
+        <div className="hero-nav">
+          <Link className="brand" href="/">
+            <span className="brand-mark">
+              <ShieldCheck size={18} />
+            </span>
+            <span>Web Audit</span>
+          </Link>
+          <div className="actions">
+            <ThemeToggle />
+            <Link className="button" href={user ? "/dashboard" : "/login"}>
+              {user ? "Dashboard" : "Log in"}
+            </Link>
+          </div>
+        </div>
         <div className="hero-inner">
           <div>
             <div className="badge">Page audit with selected website health checks</div>

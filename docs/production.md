@@ -154,7 +154,7 @@ API routes:
    - run manual audit.
    - view audit report.
    - export PDF.
-   - create and revoke share link.
+   - create share link, copy it from the modal, open it in a private window, and revoke it.
    - call `POST /api/cron/run-scheduled`.
    - confirm `/api/health` is public and minimal.
    - confirm `/admin` and `/api/admin/health` are allowlisted.

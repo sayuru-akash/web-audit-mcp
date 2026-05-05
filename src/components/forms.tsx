@@ -2,14 +2,12 @@ import type { ScheduleFrequency } from "@/lib/types";
 import {
   addWebsiteAction,
   changePasswordAction,
-  createShareAction,
   deleteAccountAction,
   deleteWebsiteAction,
   loginAction,
   markNotificationsReadAction,
   requestPasswordResetAction,
   resetPasswordAction,
-  revokeShareAction,
   runAuditAction,
   scheduleAction,
   signUpAction,
@@ -286,22 +284,6 @@ export function NotificationPreferencesForm({
         </label>
       ))}
       <button type="submit">Save notifications</button>
-    </form>
-  );
-}
-
-export function ShareButtons({ auditId, enabled }: { auditId: string; enabled: boolean }) {
-  return enabled ? (
-    <form action={revokeShareAction}>
-      <input type="hidden" name="auditId" value={auditId} />
-      <button className="danger" type="submit">
-        Revoke share
-      </button>
-    </form>
-  ) : (
-    <form action={createShareAction}>
-      <input type="hidden" name="auditId" value={auditId} />
-      <button type="submit">Create share link</button>
     </form>
   );
 }

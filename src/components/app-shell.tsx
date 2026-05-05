@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BarChart3, Bell, Globe2, LayoutDashboard, Settings, ShieldCheck } from "lucide-react";
 import type { User } from "@/lib/types";
 import { logoutAction } from "@/lib/actions";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -40,6 +41,7 @@ export function AppShell({ user, children, title, subtitle }: { user: User; chil
           </div>
           <form action={logoutAction} className="actions">
             <span className="muted">{user.displayName}</span>
+            <ThemeToggle />
             <button type="submit">Log out</button>
           </form>
         </header>

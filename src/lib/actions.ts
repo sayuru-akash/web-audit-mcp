@@ -215,7 +215,7 @@ export async function createShareAction(formData: FormData) {
   const auditId = value(formData, "auditId");
   await createOrToggleShare(user.id, auditId, true);
   revalidatePath(`/audits/${auditId}`);
-  redirect(`/audits/${auditId}`);
+  redirect(`/audits/${auditId}?share=created`);
 }
 
 export async function revokeShareAction(formData: FormData) {
