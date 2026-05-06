@@ -1,16 +1,29 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { storeAdapter } from "@/lib/persistence";
 import { id, nowIso } from "@/lib/store";
-import { getAdminEmails, isDevResetTokenDisplayEnabled, isProduction } from "@/lib/runtime-config";
+import {
+  getAdminEmails,
+  isDevResetTokenDisplayEnabled,
+  isProduction,
+} from "@/lib/runtime-config";
 import type { User } from "@/lib/types";
 
 export const sessionCookieName = "web_audit_session";
 
 export const signUpSchema = z.object({
-  displayName: z.string().trim().min(2, "Name is too short.").max(80, "Name is too long."),
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "Name is too short.")
+    .max(80, "Name is too long."),
   email: z.string().trim().email("Enter a valid email.").max(254),
   password: z.string().min(10, "Use at least 10 characters.").max(128),
 });
@@ -30,7 +43,11 @@ export const resetPasswordSchema = z.object({
 });
 
 export const profileSchema = z.object({
-  displayName: z.string().trim().min(2, "Name is too short.").max(80, "Name is too long."),
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "Name is too short.")
+    .max(80, "Name is too long."),
 });
 
 export const changePasswordSchema = z.object({
@@ -57,7 +74,9 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function createPasswordResetToken(email: string): Promise<string | undefined> {
+export async function createPasswordResetToken(
+  email: string,
+): Promise<string | undefined> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const user = await storeAdapter.getUserByEmail(email);
@@ -74,7 +93,10 @@ export async function createPasswordResetToken(email: string): Promise<string | 
   return isDevResetTokenDisplayEnabled() ? token : undefined;
 }
 
-export async function resetPasswordWithToken(token: string, password: string): Promise<void> {
+export async function resetPasswordWithToken(
+  token: string,
+  password: string,
+): Promise<void> {
   const tokenHash = hashToken(token);
   const resetToken = await storeAdapter.getValidPasswordResetToken(tokenHash);
   if (!resetToken) throw new Error("Reset token is invalid or expired.");

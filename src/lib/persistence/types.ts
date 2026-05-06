@@ -1,4 +1,15 @@
-import type { AuditRun, Finding, Metric, Notification, PasswordResetToken, Session, ShareLink, StoreData, User, Website } from "@/lib/types";
+import type {
+  AuditRun,
+  Finding,
+  Metric,
+  Notification,
+  PasswordResetToken,
+  Session,
+  ShareLink,
+  StoreData,
+  User,
+  Website,
+} from "@/lib/types";
 
 export type StoreHealth = {
   ok: boolean;
@@ -15,14 +26,26 @@ export type StoreAdapter = {
   readStore(): Promise<StoreData>;
   updateStore<T>(mutator: (data: StoreData) => T | Promise<T>): Promise<T>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  createUser(input: Omit<User, "createdAt" | "updatedAt"> & { createdAt?: string; updatedAt?: string }): Promise<User>;
-  updateUser(userId: string, updates: Partial<Omit<User, "id" | "createdAt">>): Promise<User>;
+  createUser(
+    input: Omit<User, "createdAt" | "updatedAt"> & {
+      createdAt?: string;
+      updatedAt?: string;
+    },
+  ): Promise<User>;
+  updateUser(
+    userId: string,
+    updates: Partial<Omit<User, "id" | "createdAt">>,
+  ): Promise<User>;
   findUserBySession(tokenHash: string): Promise<User | undefined>;
   createSession(input: Session): Promise<Session>;
   deleteSessionByTokenHash(tokenHash: string): Promise<void>;
   deleteSessionsForUser(userId: string): Promise<void>;
-  createPasswordResetToken(input: PasswordResetToken): Promise<PasswordResetToken>;
-  getValidPasswordResetToken(tokenHash: string): Promise<PasswordResetToken | undefined>;
+  createPasswordResetToken(
+    input: PasswordResetToken,
+  ): Promise<PasswordResetToken>;
+  getValidPasswordResetToken(
+    tokenHash: string,
+  ): Promise<PasswordResetToken | undefined>;
   markPasswordResetTokenUsed(tokenId: string, usedAt: string): Promise<void>;
   getUserDashboard(userId: string): Promise<{
     data: StoreData;
@@ -30,7 +53,10 @@ export type StoreAdapter = {
     audits: StoreData["audits"];
     notifications: StoreData["notifications"];
   }>;
-  getAuditReport(auditId: string, userId?: string): Promise<{
+  getAuditReport(
+    auditId: string,
+    userId?: string,
+  ): Promise<{
     website?: Website;
     audit?: AuditRun;
     findings: Finding[];
@@ -44,7 +70,11 @@ export type StoreAdapter = {
     metrics: Metric[];
     share?: ShareLink;
   }>;
-  checkRateLimit(key: string, limit: number, windowMs: number): Promise<boolean>;
+  checkRateLimit(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<boolean>;
   pruneExpiredSecurityRecords(): Promise<void>;
   getStoreHealth(): Promise<StoreHealth>;
 };

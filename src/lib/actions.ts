@@ -41,8 +41,13 @@ export async function signUpAction(formData: FormData) {
     email: value(formData, "email").toLowerCase(),
     password: value(formData, "password"),
   });
-  const allowed = await storeAdapter.checkRateLimit(`auth-signup:${parsed.email}`, 5, 60 * 60 * 1000);
-  if (!allowed) throw new Error("Too many sign-up attempts. Please try again later.");
+  const allowed = await storeAdapter.checkRateLimit(
+    `auth-signup:${parsed.email}`,
+    5,
+    60 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many sign-up attempts. Please try again later.");
   const existing = await storeAdapter.getUserByEmail(parsed.email);
   if (existing) throw new Error("Use the login form for this email.");
   const ts = nowIso();
@@ -67,8 +72,13 @@ export async function loginAction(formData: FormData) {
     email: value(formData, "email").toLowerCase(),
     password: value(formData, "password"),
   });
-  const allowed = await storeAdapter.checkRateLimit(`auth-login:${parsed.email}`, 10, 15 * 60 * 1000);
-  if (!allowed) throw new Error("Too many login attempts. Please try again later.");
+  const allowed = await storeAdapter.checkRateLimit(
+    `auth-login:${parsed.email}`,
+    10,
+    15 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many login attempts. Please try again later.");
   const user = await storeAdapter.getUserByEmail(parsed.email);
   if (!user || !verifyPassword(parsed.password, user.passwordHash)) {
     throw new Error("Invalid email or password.");
@@ -78,11 +88,20 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function requestPasswordResetAction(formData: FormData) {
-  const parsed = resetRequestSchema.parse({ email: value(formData, "email").toLowerCase() });
-  const allowed = await storeAdapter.checkRateLimit(`password-reset:${parsed.email}`, 3, 60 * 60 * 1000);
-  if (!allowed) throw new Error("Too many reset attempts. Please try again later.");
+  const parsed = resetRequestSchema.parse({
+    email: value(formData, "email").toLowerCase(),
+  });
+  const allowed = await storeAdapter.checkRateLimit(
+    `password-reset:${parsed.email}`,
+    3,
+    60 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many reset attempts. Please try again later.");
   const devToken = await createPasswordResetToken(parsed.email);
-  const target = devToken ? `/forgot-password?sent=1&devToken=${encodeURIComponent(devToken)}` : "/forgot-password?sent=1";
+  const target = devToken
+    ? `/forgot-password?sent=1&devToken=${encodeURIComponent(devToken)}`
+    : "/forgot-password?sent=1";
   redirect(target);
 }
 
@@ -102,7 +121,11 @@ export async function logoutAction() {
 
 export async function addWebsiteAction(formData: FormData) {
   const user = await requireUser();
-  const website = await addWebsiteForUser(user.id, value(formData, "url"), value(formData, "displayName"));
+  const website = await addWebsiteForUser(
+    user.id,
+    value(formData, "url"),
+    value(formData, "displayName"),
+  );
   revalidatePath("/websites");
   redirect(`/websites/${website.id}`);
 }
@@ -128,7 +151,11 @@ export async function scheduleAction(formData: FormData) {
 export async function updateWebsiteAction(formData: FormData) {
   const user = await requireUser();
   const websiteId = value(formData, "websiteId");
-  await updateWebsiteDetails(user.id, websiteId, value(formData, "displayName"));
+  await updateWebsiteDetails(
+    user.id,
+    websiteId,
+    value(formData, "displayName"),
+  );
   revalidatePath(`/websites/${websiteId}`);
   redirect(`/websites/${websiteId}`);
 }
@@ -163,8 +190,13 @@ export async function deleteAccountAction(formData: FormData) {
 
 export async function updateProfileAction(formData: FormData) {
   const user = await requireUser();
-  const parsed = profileSchema.parse({ displayName: value(formData, "displayName") });
-  await storeAdapter.updateUser(user.id, { displayName: parsed.displayName, updatedAt: nowIso() });
+  const parsed = profileSchema.parse({
+    displayName: value(formData, "displayName"),
+  });
+  await storeAdapter.updateUser(user.id, {
+    displayName: parsed.displayName,
+    updatedAt: nowIso(),
+  });
   revalidatePath("/settings");
   redirect("/settings");
 }
@@ -176,10 +208,16 @@ export async function changePasswordAction(formData: FormData) {
     password: value(formData, "password"),
   });
   const account = await storeAdapter.getUserByEmail(user.email);
-  if (!account || !verifyPassword(parsed.currentPassword, account.passwordHash)) {
+  if (
+    !account ||
+    !verifyPassword(parsed.currentPassword, account.passwordHash)
+  ) {
     throw new Error("Current password is incorrect.");
   }
-  await storeAdapter.updateUser(user.id, { passwordHash: hashPassword(parsed.password), updatedAt: nowIso() });
+  await storeAdapter.updateUser(user.id, {
+    passwordHash: hashPassword(parsed.password),
+    updatedAt: nowIso(),
+  });
   await storeAdapter.deleteSessionsForUser(user.id);
   await clearSessionCookie();
   redirect("/login");
