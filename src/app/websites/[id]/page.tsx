@@ -5,7 +5,8 @@ import { AppShell } from "@/components/app-shell";
 import { DeleteWebsiteForm, EditWebsiteForm, RunAuditButton, ScheduleForm } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { findingsFor, getUserDashboard, latestAuditFor } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { findingsFor, latestAuditFor } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -17,12 +18,12 @@ export const metadata: Metadata = {
 export default async function WebsiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const { data, websites, audits } = await getUserDashboard(user.id);
+  const { data, websites, audits } = await storeAdapter.getUserDashboard(user.id);
   const website = websites.find((item) => item.id === id);
   if (!website) notFound();
   const websiteAudits = audits.filter((audit) => audit.websiteId === website.id);
   const latest = latestAuditFor(website, audits);
-  const findings = latest ? findingsFor(latest.id, data.findings).filter((finding) => finding.status === "failed") : [];
+  const findings = latest ? (await storeAdapter.getAuditReport(latest.id, user.id)).findings.filter((finding) => finding.status === "failed") : [];
   return (
     <AppShell user={user} title={website.displayName} subtitle={website.normalizedUrl}>
       <div className="actions">

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { FindingEvidenceButton } from "@/components/finding-evidence";
 import { ScoreRing } from "@/components/score";
+import { storeAdapter } from "@/lib/persistence";
 import { noIndexMetadata } from "@/lib/seo";
-import { activeShareFor, findingsFor, metricsFor, readStore } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "Shared Audit Report",
@@ -13,16 +13,9 @@ export const metadata: Metadata = {
 
 export default async function SharedReportPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const data = await readStore();
-  const tokenMatch = data.shareLinks.find((item) => item.token === token);
-  const link = tokenMatch ? activeShareFor(tokenMatch.auditRunId, data.shareLinks) : undefined;
-  if (!link) notFound();
-  const audit = data.audits.find((item) => item.id === link.auditRunId && item.status === "completed");
+  const { website, audit, findings, metrics } = await storeAdapter.getSharedAuditReport(token);
   if (!audit) notFound();
-  const website = data.websites.find((item) => item.id === audit.websiteId);
   if (!website) notFound();
-  const findings = findingsFor(audit.id, data.findings);
-  const metrics = metricsFor(audit.id, data.metrics);
   const failedFindings = findings.filter((finding) => finding.status === "failed");
   const reviewFindings = findings.filter((finding) => finding.status === "needs_review");
   return (

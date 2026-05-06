@@ -5,7 +5,8 @@ import { AppShell } from "@/components/app-shell";
 import { AddWebsiteForm, RunAuditButton } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { getUserDashboard, latestAuditFor } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { latestAuditFor } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const { websites, audits, notifications } = await getUserDashboard(user.id);
+  const { websites, audits, notifications } = await storeAdapter.getUserDashboard(user.id);
   const completed = audits.filter((audit) => audit.status === "completed" && audit.overallScore !== undefined);
   const average = completed.length
     ? Math.round(completed.reduce((sum, audit) => sum + (audit.overallScore ?? 0), 0) / completed.length)

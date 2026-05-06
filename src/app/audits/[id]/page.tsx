@@ -9,8 +9,8 @@ import { ReportActions } from "@/components/report-actions";
 import { ScoreRing, ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { absoluteUrlFromOrigin, requestOrigin, timeAgo } from "@/lib/format";
+import { storeAdapter } from "@/lib/persistence";
 import { noIndexMetadata } from "@/lib/seo";
-import { activeShareFor, findingsFor, getUserDashboard, metricsFor } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "Audit Report",
@@ -27,14 +27,9 @@ export default async function AuditReportPage({
   const { id } = await params;
   const query = await searchParams;
   const user = await requireUser();
-  const { data, websites, audits } = await getUserDashboard(user.id);
-  const audit = audits.find((item) => item.id === id);
+  const { website, audit, findings, metrics, share } = await storeAdapter.getAuditReport(id, user.id);
   if (!audit) notFound();
-  const website = websites.find((item) => item.id === audit.websiteId);
   if (!website) notFound();
-  const findings = findingsFor(audit.id, data.findings);
-  const metrics = metricsFor(audit.id, data.metrics);
-  const share = activeShareFor(audit.id, data.shareLinks);
   const origin = requestOrigin(await headers());
   const shareUrl = share ? absoluteUrlFromOrigin(`/share/${share.token}`, origin) : undefined;
   const confirmedFindings = findings.filter((finding) => finding.status === "failed");

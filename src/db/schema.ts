@@ -209,3 +209,13 @@ export const passwordResetTokens = pgTable(
   },
   (table) => [uniqueIndex("password_reset_token_hash_unique").on(table.tokenHash), index("password_reset_user_idx").on(table.userId)],
 );
+
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull().default(1),
+    resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("rate_limits_reset_idx").on(table.resetAt)],
+);

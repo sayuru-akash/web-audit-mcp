@@ -2,7 +2,8 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { findUserBySession, id, nowIso, updateStore } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { id, nowIso } from "@/lib/store";
 import { getAdminEmails, isDevResetTokenDisplayEnabled, isProduction } from "@/lib/runtime-config";
 import type { User } from "@/lib/types";
 
@@ -59,50 +60,42 @@ export function hashToken(token: string): string {
 export async function createPasswordResetToken(email: string): Promise<string | undefined> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
-  await updateStore((data) => {
-    const user = data.users.find((item) => item.email === email);
-    if (!user) return;
-    data.passwordResetTokens = data.passwordResetTokens.filter((item) => item.userId !== user.id && !item.usedAt);
+  const user = await storeAdapter.getUserByEmail(email);
+  if (user) {
     const createdAt = nowIso();
-    data.passwordResetTokens.push({
+    await storeAdapter.createPasswordResetToken({
       id: id(),
       userId: user.id,
       tokenHash,
       expiresAt: new Date(Date.now() + 1000 * 60 * 30).toISOString(),
       createdAt,
     });
-  });
+  }
   return isDevResetTokenDisplayEnabled() ? token : undefined;
 }
 
 export async function resetPasswordWithToken(token: string, password: string): Promise<void> {
   const tokenHash = hashToken(token);
-  await updateStore((data) => {
-    const resetToken = data.passwordResetTokens.find(
-      (item) => item.tokenHash === tokenHash && !item.usedAt && Date.parse(item.expiresAt) > Date.now(),
-    );
-    if (!resetToken) throw new Error("Reset token is invalid or expired.");
-    const user = data.users.find((item) => item.id === resetToken.userId);
-    if (!user) throw new Error("Account not found.");
-    user.passwordHash = hashPassword(password);
-    user.updatedAt = nowIso();
-    resetToken.usedAt = nowIso();
-    data.sessions = data.sessions.filter((session) => session.userId !== user.id);
+  const resetToken = await storeAdapter.getValidPasswordResetToken(tokenHash);
+  if (!resetToken) throw new Error("Reset token is invalid or expired.");
+  await storeAdapter.updateUser(resetToken.userId, {
+    passwordHash: hashPassword(password),
+    updatedAt: nowIso(),
   });
+  await storeAdapter.markPasswordResetTokenUsed(resetToken.id, nowIso());
+  await storeAdapter.deleteSessionsForUser(resetToken.userId);
 }
 
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
-  await updateStore((data) => {
-    const createdAt = nowIso();
-    data.sessions.push({
-      id: id(),
-      userId,
-      tokenHash,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-      createdAt,
-    });
+  const createdAt = nowIso();
+  await storeAdapter.createSession({
+    id: id(),
+    userId,
+    tokenHash,
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+    createdAt,
   });
   return token;
 }
@@ -123,9 +116,7 @@ export async function clearSessionCookie() {
   const token = jar.get(sessionCookieName)?.value;
   if (token) {
     const tokenHash = hashToken(token);
-    await updateStore((data) => {
-      data.sessions = data.sessions.filter((session) => session.tokenHash !== tokenHash);
-    });
+    await storeAdapter.deleteSessionByTokenHash(tokenHash);
   }
   jar.delete(sessionCookieName);
 }
@@ -134,7 +125,7 @@ export async function currentUser(): Promise<User | undefined> {
   const jar = await cookies();
   const token = jar.get(sessionCookieName)?.value;
   if (!token) return undefined;
-  return findUserBySession(hashToken(token));
+  return storeAdapter.findUserBySession(hashToken(token));
 }
 
 export async function requireUser(): Promise<User> {
@@ -159,24 +150,19 @@ export async function requireAdmin(): Promise<User> {
 export async function optionalDemoUser(): Promise<User> {
   const user = await currentUser();
   if (user) return user;
-  return updateStore((data) => {
-    let demo = data.users.find((item) => item.email === "demo@webaudit.local");
-    if (!demo) {
-      const ts = nowIso();
-      demo = {
-        id: id(),
-        email: "demo@webaudit.local",
-        passwordHash: "demo",
-        displayName: "Demo User",
-        notifyOnAuditCompleted: true,
-        notifyOnAuditFailed: true,
-        notifyOnCriticalIssue: true,
-        notifyOnScoreDrop: true,
-        createdAt: ts,
-        updatedAt: ts,
-      };
-      data.users.push(demo);
-    }
-    return demo;
+  const existing = await storeAdapter.getUserByEmail("demo@webaudit.local");
+  if (existing) return existing;
+  const ts = nowIso();
+  return storeAdapter.createUser({
+    id: id(),
+    email: "demo@webaudit.local",
+    passwordHash: "demo",
+    displayName: "Demo User",
+    notifyOnAuditCompleted: true,
+    notifyOnAuditFailed: true,
+    notifyOnCriticalIssue: true,
+    notifyOnScoreDrop: true,
+    createdAt: ts,
+    updatedAt: ts,
   });
 }

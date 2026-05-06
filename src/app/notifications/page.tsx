@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { MarkNotificationsReadForm } from "@/components/forms";
 import { paginate, Pagination } from "@/components/pagination";
 import { requireUser } from "@/lib/auth";
-import { getUserDashboard } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ page?: string; filter?: string }> }) {
   const query = await searchParams;
   const user = await requireUser();
-  const { notifications } = await getUserDashboard(user.id);
+  const { notifications } = await storeAdapter.getUserDashboard(user.id);
   const filter = query.filter === "unread" ? "unread" : query.filter === "critical" ? "critical" : "";
   const filteredNotifications =
     filter === "unread"

@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { paginate, Pagination } from "@/components/pagination";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { getUserDashboard } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default async function AuditsPage({ searchParams }: { searchParams: Promise<{ page?: string; status?: string }> }) {
   const query = await searchParams;
   const user = await requireUser();
-  const { audits, websites } = await getUserDashboard(user.id);
+  const { audits, websites } = await storeAdapter.getUserDashboard(user.id);
   const status = query.status && ["queued", "running", "completed", "failed", "cancelled"].includes(query.status) ? query.status : "";
   const filteredAudits = status ? audits.filter((audit) => audit.status === status) : audits;
   const page = Number(query.page ?? "1");
