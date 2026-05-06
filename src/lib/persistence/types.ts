@@ -63,6 +63,45 @@ export type StoreAdapter = {
     metrics: Metric[];
     share?: ShareLink;
   }>;
+  getWebsiteById(
+    websiteId: string,
+    userId?: string,
+  ): Promise<Website | undefined>;
+  getWebsitesByUser(userId: string): Promise<Website[]>;
+  createWebsite(website: Website): Promise<Website>;
+  updateWebsite(
+    websiteId: string,
+    updates: Partial<Omit<Website, "id" | "userId" | "createdAt">>,
+  ): Promise<Website>;
+  deleteWebsite(websiteId: string, userId?: string): Promise<void>;
+  getAuditById(auditId: string, userId?: string): Promise<AuditRun | undefined>;
+  getAuditsByWebsite(websiteId: string): Promise<AuditRun[]>;
+  findActiveAuditForWebsite(websiteId: string): Promise<AuditRun | undefined>;
+  getLatestCompletedAuditForWebsite(
+    websiteId: string,
+    excludeAuditId?: string,
+  ): Promise<AuditRun | undefined>;
+  createAuditRun(audit: AuditRun): Promise<AuditRun>;
+  updateAuditRun(
+    auditId: string,
+    updates: Partial<
+      Omit<AuditRun, "id" | "websiteId" | "userId" | "createdAt">
+    >,
+  ): Promise<AuditRun>;
+  replaceAuditResults(
+    auditId: string,
+    findings: Finding[],
+    metrics: Metric[],
+  ): Promise<void>;
+  createNotification(notification: Notification): Promise<Notification>;
+  listDueScheduledWebsites(currentTime?: number): Promise<Website[]>;
+  getActiveShareLink(auditId: string): Promise<ShareLink | undefined>;
+  createOrUpdateShareLink(
+    auditId: string,
+    enabled: boolean,
+    create: () => ShareLink,
+    revokedAt?: string,
+  ): Promise<ShareLink>;
   getSharedAuditReport(token: string): Promise<{
     website?: Website;
     audit?: AuditRun;

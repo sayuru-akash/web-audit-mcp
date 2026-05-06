@@ -351,6 +351,220 @@ export const postgresStoreAdapter: StoreAdapter = {
       share: shareRow ? mapShareLink(shareRow) : undefined,
     };
   },
+  async getWebsiteById(websiteId, userId) {
+    const db = getDatabase();
+    const where = userId
+      ? and(eq(websites.id, websiteId), eq(websites.userId, userId))
+      : eq(websites.id, websiteId);
+    const [row] = await db.select().from(websites).where(where).limit(1);
+    return row ? mapWebsite(row) : undefined;
+  },
+  async getWebsitesByUser(userId) {
+    const db = getDatabase();
+    const rows = await db
+      .select()
+      .from(websites)
+      .where(eq(websites.userId, userId));
+    return rows.map(mapWebsite);
+  },
+  async createWebsite(website) {
+    const db = getDatabase();
+    const [row] = await db
+      .insert(websites)
+      .values({
+        ...website,
+        lastScheduledRunAt: website.lastScheduledRunAt
+          ? new Date(website.lastScheduledRunAt)
+          : null,
+        nextScheduledRunAt: website.nextScheduledRunAt
+          ? new Date(website.nextScheduledRunAt)
+          : null,
+        createdAt: new Date(website.createdAt),
+        updatedAt: new Date(website.updatedAt),
+      })
+      .returning();
+    return mapWebsite(row);
+  },
+  async updateWebsite(websiteId, updates) {
+    const db = getDatabase();
+    const payload: Partial<typeof websites.$inferInsert> = {};
+    if (updates.displayName !== undefined)
+      payload.displayName = updates.displayName;
+    if (updates.originalUrl !== undefined)
+      payload.originalUrl = updates.originalUrl;
+    if (updates.normalizedUrl !== undefined)
+      payload.normalizedUrl = updates.normalizedUrl;
+    if (updates.domain !== undefined) payload.domain = updates.domain;
+    if (updates.faviconUrl !== undefined)
+      payload.faviconUrl = updates.faviconUrl;
+    if (updates.scheduleFrequency !== undefined)
+      payload.scheduleFrequency = updates.scheduleFrequency;
+    if (updates.scheduleEnabled !== undefined)
+      payload.scheduleEnabled = updates.scheduleEnabled;
+    if (updates.lastScheduledRunAt !== undefined)
+      payload.lastScheduledRunAt = updates.lastScheduledRunAt
+        ? new Date(updates.lastScheduledRunAt)
+        : null;
+    if (updates.nextScheduledRunAt !== undefined)
+      payload.nextScheduledRunAt = updates.nextScheduledRunAt
+        ? new Date(updates.nextScheduledRunAt)
+        : null;
+    if (updates.alertThreshold !== undefined)
+      payload.alertThreshold = updates.alertThreshold;
+    if (updates.lastAuditId !== undefined)
+      payload.lastAuditId = updates.lastAuditId;
+    if (updates.updatedAt !== undefined)
+      payload.updatedAt = new Date(updates.updatedAt);
+    const [row] = await db
+      .update(websites)
+      .set(payload)
+      .where(eq(websites.id, websiteId))
+      .returning();
+    if (!row) throw new Error("Website not found.");
+    return mapWebsite(row);
+  },
+  async deleteWebsite() {
+    notImplemented("deleteWebsite");
+  },
+  async getAuditById(auditId, userId) {
+    const db = getDatabase();
+    const where = userId
+      ? and(eq(auditRuns.id, auditId), eq(auditRuns.userId, userId))
+      : eq(auditRuns.id, auditId);
+    const [row] = await db.select().from(auditRuns).where(where).limit(1);
+    return row ? mapAuditRun(row) : undefined;
+  },
+  async getAuditsByWebsite(websiteId) {
+    const db = getDatabase();
+    const rows = await db
+      .select()
+      .from(auditRuns)
+      .where(eq(auditRuns.websiteId, websiteId));
+    return rows.map(mapAuditRun);
+  },
+  async findActiveAuditForWebsite(websiteId) {
+    const db = getDatabase();
+    const [row] = await db
+      .select()
+      .from(auditRuns)
+      .where(
+        and(
+          eq(auditRuns.websiteId, websiteId),
+          inArray(auditRuns.status, ["queued", "running"]),
+        ),
+      )
+      .limit(1);
+    return row ? mapAuditRun(row) : undefined;
+  },
+  async getLatestCompletedAuditForWebsite(websiteId, excludeAuditId) {
+    const db = getDatabase();
+    const conditions = [
+      eq(auditRuns.websiteId, websiteId),
+      eq(auditRuns.status, "completed"),
+      sql`${auditRuns.overallScore} IS NOT NULL`,
+    ];
+    if (excludeAuditId) {
+      conditions.push(sql`${auditRuns.id} <> ${excludeAuditId}` as never);
+    }
+    const [row] = await db
+      .select()
+      .from(auditRuns)
+      .where(and(...conditions))
+      .orderBy(desc(auditRuns.completedAt), desc(auditRuns.createdAt))
+      .limit(1);
+    return row ? mapAuditRun(row) : undefined;
+  },
+  async createAuditRun(audit) {
+    const db = getDatabase();
+    const [row] = await db
+      .insert(auditRuns)
+      .values({
+        ...audit,
+        finalUrl: audit.finalUrl ?? null,
+        startedAt: audit.startedAt ? new Date(audit.startedAt) : null,
+        completedAt: audit.completedAt ? new Date(audit.completedAt) : null,
+        failureReason: audit.failureReason ?? null,
+        overallScore: audit.overallScore ?? null,
+        categoryScores: audit.categoryScores ?? null,
+        durationMs: audit.durationMs ?? null,
+        createdAt: new Date(audit.createdAt),
+        updatedAt: new Date(audit.updatedAt),
+      })
+      .returning();
+    return mapAuditRun(row);
+  },
+  async updateAuditRun(auditId, updates) {
+    const db = getDatabase();
+    const payload: Partial<typeof auditRuns.$inferInsert> = {};
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.requestedUrl !== undefined)
+      payload.requestedUrl = updates.requestedUrl;
+    if (updates.finalUrl !== undefined)
+      payload.finalUrl = updates.finalUrl ?? null;
+    if (updates.startedAt !== undefined)
+      payload.startedAt = updates.startedAt
+        ? new Date(updates.startedAt)
+        : null;
+    if (updates.completedAt !== undefined)
+      payload.completedAt = updates.completedAt
+        ? new Date(updates.completedAt)
+        : null;
+    if (updates.failureReason !== undefined)
+      payload.failureReason = updates.failureReason ?? null;
+    if (updates.overallScore !== undefined)
+      payload.overallScore = updates.overallScore ?? null;
+    if (updates.categoryScores !== undefined)
+      payload.categoryScores = updates.categoryScores ?? null;
+    if (updates.durationMs !== undefined)
+      payload.durationMs = updates.durationMs ?? null;
+    if (updates.profile !== undefined) payload.profile = updates.profile;
+    if (updates.updatedAt !== undefined)
+      payload.updatedAt = new Date(updates.updatedAt);
+    const [row] = await db
+      .update(auditRuns)
+      .set(payload)
+      .where(eq(auditRuns.id, auditId))
+      .returning();
+    if (!row) throw new Error("Audit not found.");
+    return mapAuditRun(row);
+  },
+  async replaceAuditResults() {
+    notImplemented("replaceAuditResults");
+  },
+  async createNotification(notification) {
+    const db = getDatabase();
+    const [row] = await db
+      .insert(notifications)
+      .values({
+        ...notification,
+        websiteId: notification.websiteId ?? null,
+        auditRunId: notification.auditRunId ?? null,
+        createdAt: new Date(notification.createdAt),
+      })
+      .returning();
+    return mapNotification(row);
+  },
+  async listDueScheduledWebsites() {
+    notImplemented("listDueScheduledWebsites");
+  },
+  async getActiveShareLink(auditId) {
+    const db = getDatabase();
+    const [row] = await db
+      .select()
+      .from(shareLinks)
+      .where(
+        and(
+          eq(shareLinks.auditRunId, auditId),
+          eq(shareLinks.enabled, true),
+          sql`${shareLinks.revokedAt} IS NULL`,
+        ),
+      )
+      .limit(1);
+    return row ? mapShareLink(row) : undefined;
+  },
+  async createOrUpdateShareLink() {
+    notImplemented("createOrUpdateShareLink");
+  },
   async getSharedAuditReport(token) {
     const db = getDatabase();
     const now = new Date();
