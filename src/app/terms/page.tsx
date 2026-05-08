@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { pageMetadata } from "@/lib/seo";
 
@@ -14,7 +15,7 @@ export default function TermsPage() {
     <main className="legal-page">
       <nav className="legal-nav">
         <Link className="brand" href="/">
-          <span className="brand-mark">W</span>
+          <BrandMark />
           <span>Web Audit</span>
         </Link>
         <div className="actions">

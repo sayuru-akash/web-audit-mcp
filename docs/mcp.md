@@ -61,14 +61,19 @@ See [docs/agent-connections.md](agent-connections.md) for exact Codex CLI, Codex
 - Email: `agent@webaudit.local`
 - Display name: `Codex Agent`
 
-Persisted MCP audits go to `data/webaudit.json`, the same local JSON store used by the web app. This means the same JSON limits apply:
+Persisted MCP audits use the same active store adapter as the web app:
+
+- JSON mode writes to `data/webaudit.json`.
+- Postgres mode writes to the configured `DATABASE_URL`.
+
+In JSON mode, the same JSON limits apply:
 
 - single-process write serialization only.
 - no multi-instance safety.
 - no distributed rate limits.
 - private audit/account data stored in the local file.
 
-For production MCP usage across multiple app instances or workers, migrate persistence to Postgres/Drizzle first and keep MCP tools on the same service-layer safety path.
+For production MCP usage across multiple app instances or workers, use Postgres mode and keep MCP tools on the same service-layer safety path.
 
 ## Security Expectations
 

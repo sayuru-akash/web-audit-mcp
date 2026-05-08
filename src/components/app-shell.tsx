@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { BarChart3, Bell, Globe2, LayoutDashboard, Settings, ShieldCheck } from "lucide-react";
+import { BarChart3, Bell, Globe2, LayoutDashboard, Settings } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import type { User } from "@/lib/types";
 import { logoutAction } from "@/lib/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -17,9 +18,7 @@ export function AppShell({ user, children, title, subtitle }: { user: User; chil
     <div className="shell">
       <aside className="sidebar">
         <Link className="brand" href="/dashboard">
-          <span className="brand-mark">
-            <ShieldCheck size={18} />
-          </span>
+          <BrandMark />
           <span>Web Audit</span>
         </Link>
         <nav className="nav" aria-label="Main navigation">

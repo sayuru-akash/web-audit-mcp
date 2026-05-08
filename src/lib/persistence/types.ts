@@ -36,6 +36,7 @@ export type StoreAdapter = {
     userId: string,
     updates: Partial<Omit<User, "id" | "createdAt">>,
   ): Promise<User>;
+  deleteUser(userId: string): Promise<void>;
   findUserBySession(tokenHash: string): Promise<User | undefined>;
   createSession(input: Session): Promise<Session>;
   deleteSessionByTokenHash(tokenHash: string): Promise<void>;
@@ -94,6 +95,9 @@ export type StoreAdapter = {
     metrics: Metric[],
   ): Promise<void>;
   createNotification(notification: Notification): Promise<Notification>;
+  markNotificationsRead(userId: string): Promise<void>;
+  listQueuedAudits(limit: number): Promise<AuditRun[]>;
+  recoverStaleAudits(cutoffMs: number): Promise<number>;
   listDueScheduledWebsites(currentTime?: number): Promise<Website[]>;
   getActiveShareLink(auditId: string): Promise<ShareLink | undefined>;
   createOrUpdateShareLink(

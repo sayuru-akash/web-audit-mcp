@@ -15,20 +15,23 @@
     "mcp:smoke": "tsx scripts/smoke-mcp-client.ts",
     "audit:url": "tsx scripts/audit-url.ts",
     "worker:once": "tsx scripts/worker-once.ts",
+    "db:migrate": "tsx scripts/migrate-db.ts",
+    "db:smoke": "tsx scripts/smoke-postgres.ts",
     "db:schema:check": "tsx scripts/check-db-schema.ts"
   },
   "overrides": {
+    "express-rate-limit": "^8.5.1",
     "postcss": "^8.5.10"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@neondatabase/serverless": "^1.1.0",
     "@react-pdf/renderer": "^4.5.1",
     "cheerio": "^1.2.0",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.14.0",
     "next": "^16.2.4",
+    "postgres": "^3.4.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "zod": "^4.4.3"

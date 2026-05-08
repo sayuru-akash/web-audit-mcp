@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { pageMetadata } from "@/lib/seo";
 
@@ -14,7 +15,7 @@ export default function PrivacyPage() {
     <main className="legal-page">
       <nav className="legal-nav">
         <Link className="brand" href="/">
-          <span className="brand-mark">W</span>
+          <BrandMark />
           <span>Web Audit</span>
         </Link>
         <div className="actions">
@@ -37,8 +38,8 @@ export default function PrivacyPage() {
             <p>Reports are visible only to the signed-in account owner unless a private share link is created. Shared reports expose only that selected audit.</p>
           </article>
           <article>
-            <h2>Local Runtime Storage</h2>
-            <p>The current runtime uses a local JSON store for single-node operation. Treat the data directory as private operational state and back it up securely.</p>
+            <h2>Runtime Storage</h2>
+            <p>The app can use local JSON for single-node operation or Postgres for shared runtime persistence. Treat either store as private operational state and back it up securely.</p>
           </article>
           <article>
             <h2>Deletion</h2>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShieldAlert } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function NotFound() {
@@ -7,9 +7,7 @@ export default function NotFound() {
     <main className="state-page">
       <div className="state-card">
         <div className="actions" style={{ justifyContent: "space-between" }}>
-          <span className="brand-mark">
-            <ShieldAlert size={18} />
-          </span>
+          <BrandMark />
           <ThemeToggle />
         </div>
         <h1>Page not found</h1>

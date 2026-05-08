@@ -40,6 +40,40 @@ export const jsonStoreAdapter: StoreAdapter = {
       return user;
     });
   },
+  async deleteUser(userId) {
+    await updateStore((data) => {
+      const websiteIds = new Set(
+        data.websites
+          .filter((website) => website.userId === userId)
+          .map((website) => website.id),
+      );
+      const auditIds = new Set(
+        data.audits
+          .filter((audit) => audit.userId === userId)
+          .map((audit) => audit.id),
+      );
+      data.shareLinks = data.shareLinks.filter(
+        (link) => !auditIds.has(link.auditRunId),
+      );
+      data.metrics = data.metrics.filter(
+        (metric) => !auditIds.has(metric.auditRunId),
+      );
+      data.findings = data.findings.filter(
+        (finding) => !auditIds.has(finding.auditRunId),
+      );
+      data.notifications = data.notifications.filter(
+        (notification) => notification.userId !== userId,
+      );
+      data.audits = data.audits.filter((audit) => audit.userId !== userId);
+      data.websites = data.websites.filter(
+        (website) => !websiteIds.has(website.id),
+      );
+      data.sessions = data.sessions.filter(
+        (session) => session.userId !== userId,
+      );
+      data.users = data.users.filter((user) => user.id !== userId);
+    });
+  },
   findUserBySession,
   async createSession(input) {
     return updateStore((data) => {
@@ -223,6 +257,43 @@ export const jsonStoreAdapter: StoreAdapter = {
     return updateStore((data) => {
       data.notifications.push(notification);
       return notification;
+    });
+  },
+  async markNotificationsRead(userId) {
+    await updateStore((data) => {
+      for (const notification of data.notifications) {
+        if (notification.userId === userId) notification.read = true;
+      }
+    });
+  },
+  async listQueuedAudits(limit) {
+    const data = await readStore();
+    return data.audits
+      .filter((audit) => audit.status === "queued")
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      .slice(0, Math.max(1, Math.min(10, limit)));
+  },
+  async recoverStaleAudits(cutoffMs) {
+    return updateStore((data) => {
+      const cutoff = Date.now() - cutoffMs;
+      let recovered = 0;
+      for (const audit of data.audits) {
+        const activeAt = Date.parse(
+          audit.startedAt ?? audit.updatedAt ?? audit.createdAt,
+        );
+        if (
+          (audit.status === "running" || audit.status === "queued") &&
+          activeAt < cutoff
+        ) {
+          audit.status = "failed";
+          audit.failureReason =
+            "Audit was marked stale after the worker did not finish in time.";
+          audit.completedAt = new Date().toISOString();
+          audit.updatedAt = audit.completedAt;
+          recovered += 1;
+        }
+      }
+      return recovered;
     });
   },
   async listDueScheduledWebsites(currentTime = Date.now()) {

@@ -6,7 +6,7 @@
 - Do not imply full-site crawling or penetration testing. The v1 audit is a page audit with selected website health checks.
 - Keep SSRF protections, rate limits, timeouts, and private network blocking active in every audit path, including MCP tools.
 - Preserve redirect-hop validation, admin allowlisting, cron secret enforcement, and serialized store writes.
-- Document the current storage truthfully: local JSON is the active store; Postgres/Drizzle schema and migration exist, but service wiring is still required before DATABASE_URL becomes active runtime persistence.
+- Document the current storage truthfully: local JSON is the default store; Postgres/Drizzle is an active runtime option when `WEB_AUDIT_STORE=postgres` and `DATABASE_URL` are configured.
 - Keep route, command, MCP, admin, cron, and deployment-checklist docs in sync with the implementation.
 - Validate with `npm run check` before calling the repo healthy.
 - For MCP or agent-connection changes, also run `npm run mcp:smoke -- https://example.com --run-audit`.

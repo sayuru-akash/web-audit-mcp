@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { requireAdmin } from "@/lib/auth";
 import { getOperationalHealth } from "@/lib/audit-service";
-import { getStoreHealth } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
 import { noIndexMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 export default async function AdminPage() {
   const user = await requireAdmin();
   const health = await getOperationalHealth();
-  const store = await getStoreHealth();
+  const store = await storeAdapter.getStoreHealth();
   return (
     <AppShell user={user} title="System health" subtitle="Minimal operator view for queue and audit outcomes.">
       <div className="grid cols-4">

@@ -1,10 +1,4 @@
-import {
-  addNotification,
-  id,
-  nowIso,
-  readStore,
-  updateStore,
-} from "@/lib/store";
+import { id, nowIso } from "@/lib/store";
 import { storeAdapter } from "@/lib/persistence";
 import type {
   AuditRun,
@@ -54,6 +48,27 @@ export async function addWebsiteForUser(
 
 const STALE_AUDIT_MS = 30 * 60 * 1000;
 
+async function createNotificationForUser(
+  notification: Omit<import("@/lib/types").Notification, "id" | "createdAt" | "read">,
+) {
+  const data = await storeAdapter.readStore();
+  const user = data.users.find((item) => item.id === notification.userId);
+  const enabled = {
+    audit_completed: user?.notifyOnAuditCompleted ?? true,
+    scheduled_completed: user?.notifyOnAuditCompleted ?? true,
+    audit_failed: user?.notifyOnAuditFailed ?? true,
+    critical_issue: user?.notifyOnCriticalIssue ?? true,
+    score_dropped: user?.notifyOnScoreDrop ?? true,
+  }[notification.type];
+  if (!enabled) return undefined;
+  return storeAdapter.createNotification({
+    ...notification,
+    id: id(),
+    read: false,
+    createdAt: nowIso(),
+  });
+}
+
 function nextRunAt(
   frequency: ScheduleFrequency,
   from = new Date(),
@@ -101,170 +116,141 @@ export async function processAudit(
   source: "manual" | "scheduled" = "manual",
 ): Promise<AuditRun> {
   const startedAt = nowIso();
-  await updateStore((data) => {
-    const audit = data.audits.find((item) => item.id === auditId);
-    if (!audit) throw new Error("Audit not found.");
-    audit.status = "running";
-    audit.startedAt = startedAt;
-    audit.updatedAt = startedAt;
+  await storeAdapter.updateAuditRun(auditId, {
+    status: "running",
+    startedAt,
+    updatedAt: startedAt,
   });
 
-  const snapshot = await readStore();
-  const audit = snapshot.audits.find((item) => item.id === auditId);
+  const audit = await storeAdapter.getAuditById(auditId);
   if (!audit) throw new Error("Audit not found.");
   try {
     const result = await runPageAudit(audit.requestedUrl);
-    return updateStore((data) => {
-      const current = data.audits.find((item) => item.id === auditId);
-      if (!current) throw new Error("Audit not found.");
-      const website = data.websites.find(
-        (site: Website) => site.id === current.websiteId,
+    const completedAt = nowIso();
+    const website = await storeAdapter.getWebsiteById(audit.websiteId);
+    const previousCompleted =
+      await storeAdapter.getLatestCompletedAuditForWebsite(
+        audit.websiteId,
+        audit.id,
       );
-      const completedAt = nowIso();
-      const previousCompleted = data.audits
-        .filter(
-          (item) =>
-            item.websiteId === current.websiteId &&
-            item.id !== current.id &&
-            item.status === "completed" &&
-            item.overallScore !== undefined,
-        )
-        .sort(
-          (a, b) =>
-            Date.parse(b.completedAt ?? b.createdAt) -
-            Date.parse(a.completedAt ?? a.createdAt),
-        )[0];
-      current.status = "completed";
-      current.finalUrl = result.finalUrl;
-      current.completedAt = completedAt;
-      current.durationMs = Date.parse(completedAt) - Date.parse(startedAt);
-      current.overallScore = result.overallScore;
-      current.categoryScores = result.categoryScores;
-      current.updatedAt = completedAt;
-      data.findings = data.findings.filter(
-        (finding) => finding.auditRunId !== auditId,
-      );
-      data.metrics = data.metrics.filter(
-        (metric) => metric.auditRunId !== auditId,
-      );
-      data.findings.push(
-        ...result.findings.map((finding) => ({
-          ...finding,
-          id: id(),
-          auditRunId: auditId,
-        })),
-      );
-      data.metrics.push(
-        ...result.metrics.map((metric) => ({
-          ...metric,
-          id: id(),
-          auditRunId: auditId,
-        })),
-      );
-      if (website) {
-        website.lastAuditId = auditId;
-        if (source === "scheduled") {
-          website.lastScheduledRunAt = completedAt;
-          website.nextScheduledRunAt = nextRunAt(
-            website.scheduleFrequency,
-            new Date(completedAt),
-          );
-        }
-        website.updatedAt = completedAt;
-      }
-      addNotification(data, {
+    const nextFindings = result.findings.map((finding) => ({
+      ...finding,
+      id: id(),
+      auditRunId: auditId,
+    }));
+    const nextMetrics = result.metrics.map((metric) => ({
+      ...metric,
+      id: id(),
+      auditRunId: auditId,
+    }));
+    const current = await storeAdapter.updateAuditRun(auditId, {
+      status: "completed",
+      finalUrl: result.finalUrl,
+      completedAt,
+      durationMs: Date.parse(completedAt) - Date.parse(startedAt),
+      overallScore: result.overallScore,
+      categoryScores: result.categoryScores,
+      updatedAt: completedAt,
+    });
+    await storeAdapter.replaceAuditResults(auditId, nextFindings, nextMetrics);
+    if (website) {
+      await storeAdapter.updateWebsite(website.id, {
+        lastAuditId: auditId,
+        lastScheduledRunAt:
+          source === "scheduled" ? completedAt : website.lastScheduledRunAt,
+        nextScheduledRunAt:
+          source === "scheduled"
+            ? nextRunAt(website.scheduleFrequency, new Date(completedAt))
+            : website.nextScheduledRunAt,
+        updatedAt: completedAt,
+      });
+    }
+    await createNotificationForUser({
+      userId: current.userId,
+      websiteId: current.websiteId,
+      auditRunId: current.id,
+      type: "audit_completed",
+      title: "Audit completed",
+      message: `${website?.displayName ?? "Website"} scored ${result.overallScore}.`,
+    });
+    if (source === "scheduled") {
+      await createNotificationForUser({
         userId: current.userId,
         websiteId: current.websiteId,
         auditRunId: current.id,
-        type: "audit_completed",
-        title: "Audit completed",
-        message: `${website?.displayName ?? "Website"} scored ${result.overallScore}.`,
+        type: "scheduled_completed",
+        title: "Scheduled audit completed",
+        message: `${website?.displayName ?? "Website"} finished its scheduled audit.`,
       });
-      if (source === "scheduled") {
-        addNotification(data, {
-          userId: current.userId,
-          websiteId: current.websiteId,
-          auditRunId: current.id,
-          type: "scheduled_completed",
-          title: "Scheduled audit completed",
-          message: `${website?.displayName ?? "Website"} finished its scheduled audit.`,
-        });
-      }
-      if (
-        data.findings.some(
-          (finding) =>
-            finding.auditRunId === auditId &&
-            finding.status === "failed" &&
-            finding.severity === "critical",
-        )
-      ) {
-        addNotification(data, {
-          userId: current.userId,
-          websiteId: current.websiteId,
-          auditRunId: current.id,
-          type: "critical_issue",
-          title: "Critical issue found",
-          message: "A critical issue was found in the latest audit.",
-        });
-      }
-      if (
-        previousCompleted?.overallScore !== undefined &&
-        previousCompleted.overallScore - result.overallScore >=
-          (website?.alertThreshold ?? 10)
-      ) {
-        addNotification(data, {
-          userId: current.userId,
-          websiteId: current.websiteId,
-          auditRunId: current.id,
-          type: "score_dropped",
-          title: "Score dropped",
-          message: `Overall score dropped from ${previousCompleted.overallScore} to ${result.overallScore}.`,
-        });
-      }
-      return current;
-    });
+    }
+    if (
+      nextFindings.some(
+        (finding) =>
+          finding.status === "failed" && finding.severity === "critical",
+      )
+    ) {
+      await createNotificationForUser({
+        userId: current.userId,
+        websiteId: current.websiteId,
+        auditRunId: current.id,
+        type: "critical_issue",
+        title: "Critical issue found",
+        message: "A critical issue was found in the latest audit.",
+      });
+    }
+    if (
+      previousCompleted?.overallScore !== undefined &&
+      previousCompleted.overallScore - result.overallScore >=
+        (website?.alertThreshold ?? 10)
+    ) {
+      await createNotificationForUser({
+        userId: current.userId,
+        websiteId: current.websiteId,
+        auditRunId: current.id,
+        type: "score_dropped",
+        title: "Score dropped",
+        message: `Overall score dropped from ${previousCompleted.overallScore} to ${result.overallScore}.`,
+      });
+    }
+    return current;
   } catch (error) {
-    return updateStore((data) => {
-      const current = data.audits.find((item) => item.id === auditId);
-      if (!current) throw new Error("Audit not found.");
-      current.status = "failed";
-      current.failureReason =
+    const completedAt = nowIso();
+    const current = await storeAdapter.updateAuditRun(auditId, {
+      status: "failed",
+      failureReason:
         error instanceof Error
           ? error.message
-          : "The audit failed unexpectedly.";
-      current.completedAt = nowIso();
-      current.updatedAt = current.completedAt;
-      const website = data.websites.find(
-        (site) => site.id === current.websiteId,
-      );
-      if (source === "scheduled" && website) {
-        website.lastScheduledRunAt = current.completedAt;
-        website.nextScheduledRunAt = nextRunAt(
-          website.scheduleFrequency,
-          new Date(current.completedAt),
-        );
-      }
-      addNotification(data, {
-        userId: current.userId,
-        websiteId: current.websiteId,
-        auditRunId: current.id,
-        type: "audit_failed",
-        title: "Audit failed",
-        message:
-          "We could not complete this audit. Please retry after checking the URL.",
-      });
-      return current;
+          : "The audit failed unexpectedly.",
+      completedAt,
+      updatedAt: completedAt,
     });
+    const website = await storeAdapter.getWebsiteById(current.websiteId);
+    if (source === "scheduled" && website) {
+      await storeAdapter.updateWebsite(website.id, {
+        lastScheduledRunAt: completedAt,
+        nextScheduledRunAt: nextRunAt(
+          website.scheduleFrequency,
+          new Date(completedAt),
+        ),
+        updatedAt: completedAt,
+      });
+    }
+    await createNotificationForUser({
+      userId: current.userId,
+      websiteId: current.websiteId,
+      auditRunId: current.id,
+      type: "audit_failed",
+      title: "Audit failed",
+      message:
+        "We could not complete this audit. Please retry after checking the URL.",
+    });
+    return current;
   }
 }
 
 export async function processQueuedAudits(limit = 3): Promise<AuditRun[]> {
   await recoverStaleAudits();
-  const data = await readStore();
-  const queued = data.audits
-    .filter((audit) => audit.status === "queued")
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-    .slice(0, Math.max(1, Math.min(10, limit)));
+  const queued = await storeAdapter.listQueuedAudits(limit);
   const processed: AuditRun[] = [];
   for (const audit of queued) {
     processed.push(await processAudit(audit.id));
@@ -273,31 +259,11 @@ export async function processQueuedAudits(limit = 3): Promise<AuditRun[]> {
 }
 
 export async function recoverStaleAudits(): Promise<number> {
-  return updateStore((data) => {
-    const cutoff = Date.now() - STALE_AUDIT_MS;
-    let recovered = 0;
-    for (const audit of data.audits) {
-      const activeAt = Date.parse(
-        audit.startedAt ?? audit.updatedAt ?? audit.createdAt,
-      );
-      if (
-        (audit.status === "running" || audit.status === "queued") &&
-        activeAt < cutoff
-      ) {
-        audit.status = "failed";
-        audit.failureReason =
-          "Audit was marked stale after the worker did not finish in time.";
-        audit.completedAt = nowIso();
-        audit.updatedAt = audit.completedAt;
-        recovered += 1;
-      }
-    }
-    return recovered;
-  });
+  return storeAdapter.recoverStaleAudits(STALE_AUDIT_MS);
 }
 
 export async function getOperationalHealth() {
-  const data = await readStore();
+  const data = await storeAdapter.readStore();
   const now = Date.now();
   const queued = data.audits.filter((audit) => audit.status === "queued");
   const running = data.audits.filter((audit) => audit.status === "running");
@@ -359,20 +325,16 @@ export async function updateSchedule(
   frequency: ScheduleFrequency,
   alertThreshold: number,
 ) {
-  return updateStore((data) => {
-    const website = data.websites.find(
-      (site) => site.id === websiteId && site.userId === userId,
-    );
-    if (!website) throw new Error("Website not found.");
-    website.scheduleFrequency = frequency;
-    website.scheduleEnabled = frequency !== "manual";
-    website.nextScheduledRunAt = nextRunAt(frequency);
-    if (frequency === "manual") {
-      website.lastScheduledRunAt = undefined;
-    }
-    website.alertThreshold = Math.max(1, Math.min(50, alertThreshold));
-    website.updatedAt = nowIso();
-    return website;
+  const website = await storeAdapter.getWebsiteById(websiteId, userId);
+  if (!website) throw new Error("Website not found.");
+  return storeAdapter.updateWebsite(websiteId, {
+    scheduleFrequency: frequency,
+    scheduleEnabled: frequency !== "manual",
+    nextScheduledRunAt: nextRunAt(frequency),
+    lastScheduledRunAt:
+      frequency === "manual" ? undefined : website.lastScheduledRunAt,
+    alertThreshold: Math.max(1, Math.min(50, alertThreshold)),
+    updatedAt: nowIso(),
   });
 }
 
@@ -381,81 +343,23 @@ export async function updateWebsiteDetails(
   websiteId: string,
   displayName: string,
 ) {
-  return updateStore((data) => {
-    const website = data.websites.find(
-      (site) => site.id === websiteId && site.userId === userId,
-    );
-    if (!website) throw new Error("Website not found.");
-    const cleanName = displayName.trim();
-    if (cleanName.length < 2 || cleanName.length > 120)
-      throw new Error("Website name must be 2 to 120 characters.");
-    website.displayName = cleanName;
-    website.updatedAt = nowIso();
-    return website;
+  const website = await storeAdapter.getWebsiteById(websiteId, userId);
+  if (!website) throw new Error("Website not found.");
+  const cleanName = displayName.trim();
+  if (cleanName.length < 2 || cleanName.length > 120)
+    throw new Error("Website name must be 2 to 120 characters.");
+  return storeAdapter.updateWebsite(websiteId, {
+    displayName: cleanName,
+    updatedAt: nowIso(),
   });
 }
 
 export async function deleteWebsiteForUser(userId: string, websiteId: string) {
-  return updateStore((data) => {
-    const website = data.websites.find(
-      (site) => site.id === websiteId && site.userId === userId,
-    );
-    if (!website) throw new Error("Website not found.");
-    const auditIds = new Set(
-      data.audits
-        .filter((audit) => audit.websiteId === websiteId)
-        .map((audit) => audit.id),
-    );
-    data.shareLinks = data.shareLinks.filter(
-      (link) => !auditIds.has(link.auditRunId),
-    );
-    data.metrics = data.metrics.filter(
-      (metric) => !auditIds.has(metric.auditRunId),
-    );
-    data.findings = data.findings.filter(
-      (finding) => !auditIds.has(finding.auditRunId),
-    );
-    data.notifications = data.notifications.filter(
-      (notification) => notification.websiteId !== websiteId,
-    );
-    data.audits = data.audits.filter((audit) => audit.websiteId !== websiteId);
-    data.websites = data.websites.filter((site) => site.id !== websiteId);
-  });
+  return storeAdapter.deleteWebsite(websiteId, userId);
 }
 
 export async function deleteAccountForUser(userId: string) {
-  return updateStore((data) => {
-    const websiteIds = new Set(
-      data.websites
-        .filter((website) => website.userId === userId)
-        .map((website) => website.id),
-    );
-    const auditIds = new Set(
-      data.audits
-        .filter((audit) => audit.userId === userId)
-        .map((audit) => audit.id),
-    );
-    data.shareLinks = data.shareLinks.filter(
-      (link) => !auditIds.has(link.auditRunId),
-    );
-    data.metrics = data.metrics.filter(
-      (metric) => !auditIds.has(metric.auditRunId),
-    );
-    data.findings = data.findings.filter(
-      (finding) => !auditIds.has(finding.auditRunId),
-    );
-    data.notifications = data.notifications.filter(
-      (notification) => notification.userId !== userId,
-    );
-    data.audits = data.audits.filter((audit) => audit.userId !== userId);
-    data.websites = data.websites.filter(
-      (website) => !websiteIds.has(website.id),
-    );
-    data.sessions = data.sessions.filter(
-      (session) => session.userId !== userId,
-    );
-    data.users = data.users.filter((user) => user.id !== userId);
-  });
+  return storeAdapter.deleteUser(userId);
 }
 
 export async function createOrToggleShare(
@@ -463,51 +367,23 @@ export async function createOrToggleShare(
   auditId: string,
   enabled: boolean,
 ): Promise<ShareLink> {
-  return updateStore((data) => {
-    const audit = data.audits.find(
-      (item) =>
-        item.id === auditId &&
-        item.userId === userId &&
-        item.status === "completed",
-    );
-    if (!audit) throw new Error("Completed audit not found.");
-    let link = data.shareLinks.find(
-      (item) => item.auditRunId === auditId && !item.revokedAt,
-    );
-    if (!link) {
-      link = {
+  const audit = await storeAdapter.getAuditById(auditId, userId);
+  if (!audit || audit.status !== "completed")
+    throw new Error("Completed audit not found.");
+  return storeAdapter.createOrUpdateShareLink(
+    auditId,
+    enabled,
+    () => ({
         id: id(),
         auditRunId: auditId,
         token: id().replaceAll("-", ""),
         enabled,
         createdAt: nowIso(),
-      };
-      data.shareLinks.push(link);
-    }
-    link.enabled = enabled;
-    if (!enabled) link.revokedAt = nowIso();
-    return link;
-  });
+      }),
+    enabled ? undefined : nowIso(),
+  );
 }
 
 export async function dueScheduledWebsites(): Promise<Website[]> {
-  const data = await readStore();
-  const currentTime = Date.now();
-  return data.websites.filter((website) => {
-    if (!website.scheduleEnabled || website.scheduleFrequency === "manual")
-      return false;
-    if (website.nextScheduledRunAt)
-      return Date.parse(website.nextScheduledRunAt) <= currentTime;
-    const latest = data.audits
-      .filter((audit) => audit.websiteId === website.id)
-      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-    if (!latest) return true;
-    const interval = {
-      daily: 24 * 60 * 60 * 1000,
-      weekly: 7 * 24 * 60 * 60 * 1000,
-      monthly: 30 * 24 * 60 * 60 * 1000,
-      manual: Infinity,
-    }[website.scheduleFrequency];
-    return currentTime - Date.parse(latest.createdAt) >= interval;
-  });
+  return storeAdapter.listDueScheduledWebsites();
 }

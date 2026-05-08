@@ -4,28 +4,23 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { addWebsiteForUser, runAuditForWebsite } from "../lib/audit-service";
 import { runPageAudit } from "../lib/audit-engine";
-import { findingsFor, metricsFor, readStore } from "../lib/store";
+import { storeAdapter } from "../lib/persistence";
+import { nowIso } from "../lib/store";
 import { assertPublicUrl } from "../lib/url";
 
 const AGENT_USER_ID = "agent";
 
 async function ensureAgentUser() {
-  const { updateStore, nowIso } = await import("../lib/store");
-  return updateStore((data) => {
-    let user = data.users.find((item) => item.id === AGENT_USER_ID);
-    if (!user) {
-      const ts = nowIso();
-      user = {
-        id: AGENT_USER_ID,
-        email: "agent@webaudit.local",
-        passwordHash: "mcp",
-        displayName: "Codex Agent",
-        createdAt: ts,
-        updatedAt: ts,
-      };
-      data.users.push(user);
-    }
-    return user;
+  const existing = await storeAdapter.getUserByEmail("agent@webaudit.local");
+  if (existing) return existing;
+  const ts = nowIso();
+  return storeAdapter.createUser({
+    id: AGENT_USER_ID,
+    email: "agent@webaudit.local",
+    passwordHash: "mcp",
+    displayName: "Codex Agent",
+    createdAt: ts,
+    updatedAt: ts,
   });
 }
 
@@ -119,16 +114,8 @@ server.registerTool(
     },
   },
   async ({ auditId }) => {
-    const data = await readStore();
-    const audit = data.audits.find((item) => item.id === auditId);
-    if (!audit) throw new Error("Audit not found.");
-    const website = data.websites.find((item) => item.id === audit.websiteId);
-    const report = {
-      website,
-      audit,
-      findings: findingsFor(audit.id, data.findings),
-      metrics: metricsFor(audit.id, data.metrics),
-    };
+    const report = await storeAdapter.getAuditReport(auditId);
+    if (!report.audit) throw new Error("Audit not found.");
     return {
       content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
       structuredContent: report,

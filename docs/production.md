@@ -5,12 +5,12 @@ Web Audit v1 is a page-audit product with selected website health checks. Keep p
 ## Current Runtime Shape
 
 - App runtime: Next.js App Router.
-- Persistence today: local JSON at `data/webaudit.json`.
+- Persistence: JSON by default, or Postgres when `WEB_AUDIT_STORE=postgres` and `DATABASE_URL` are configured.
 - Audit execution: the web app and MCP server call the shared audit service and audit engine.
 - Queued/scheduled work: `npm run worker:once -- 5` or `POST /api/cron/run-scheduled`.
 - MCP transport: local stdio through `npm run mcp`.
-- Database libraries present: `drizzle-orm` and `@neondatabase/serverless`.
-- Database runtime status: Postgres/Drizzle schema and initial SQL migration exist, but JSON is still the current runtime store.
+- Database libraries present: `drizzle-orm` and `postgres`.
+- Database runtime status: Postgres/Drizzle migrations and a runtime store adapter are implemented.
 
 ## Required Production Environment
 
@@ -20,7 +20,8 @@ Web Audit v1 is a page-audit product with selected website health checks. Keep p
 | `CRON_SECRET` | Yes | Strong random secret used as `Authorization: Bearer <secret>`. |
 | `ADMIN_EMAILS` | Yes | Comma-separated operator email allowlist. |
 | `WEB_AUDIT_DEV_RESET_TOKENS` | Yes | `false`; production blocks development token display if this is accidentally enabled. |
-| `DATABASE_URL` | No | Leave unset until the Postgres runtime adapter is enabled. |
+| `WEB_AUDIT_STORE` | No | `json` or `postgres`. Defaults to JSON when unset. |
+| `DATABASE_URL` | Required for Postgres mode | PostgreSQL connection string. Leave unset in JSON mode. |
 
 ## Local JSON Storage Limits
 
@@ -42,19 +43,25 @@ If you use JSON in a private single-node deployment:
 - Test restore before relying on the backup.
 - Keep file permissions restricted to the app user.
 
-## Optional Postgres/Drizzle Path
+## Postgres Runtime Path
 
-Postgres/Drizzle is the intended production persistence direction. The schema and initial SQL migration are present, but the app still needs a runtime store adapter before it can use Postgres for live data.
+Postgres/Drizzle is the production persistence path for shared runtime data. The app uses the Postgres adapter when `WEB_AUDIT_STORE=postgres` and `DATABASE_URL` are set.
 
-Do not treat `DATABASE_URL` as active until these are complete:
+Runtime coverage:
 
-- Store adapter replacing JSON reads/writes without changing product behavior.
+- Store adapter for auth, sessions, password reset tokens, websites, audits, findings, metrics, notifications, share links, scheduled audits, admin health, MCP persistence, and rate limits.
 - Unique constraints for user emails, session token hashes, share tokens, and per-user website URLs.
-- Transactional audit completion that writes run status, findings, metrics, latest website summary, and notifications atomically.
 - Shared rate-limit storage.
-- Seed or fixture data for local tests.
-- Backup, restore, and migration rollback procedure.
-- Parity tests for signup/login, password reset token flow, website CRUD, manual audits, scheduled audits, PDF export, share links, admin health, and MCP persistence.
+- SQL migrations through `npm run db:migrate`.
+- Service smoke test through `npm run db:smoke -- https://www.wikipedia.org/`.
+
+Local setup:
+
+```bash
+createdb web_audit_mcp
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:migrate
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:smoke -- https://www.wikipedia.org/
+```
 
 For hosted Postgres such as Neon:
 
@@ -133,6 +140,8 @@ API routes:
 | `npm run mcp` | Start local MCP stdio server. |
 | `npm run audit:url -- https://example.com` | Run one direct page audit and print JSON. |
 | `npm run worker:once -- 5` | Process up to five queued audit runs. |
+| `npm run db:migrate` | Apply Postgres SQL migrations. |
+| `npm run db:smoke -- https://www.wikipedia.org/` | Run a Postgres-backed service smoke test. |
 | `npm run db:schema:check` | Verify the committed Drizzle schema table set. |
 
 ## Exact Production Deployment Checklist
@@ -146,10 +155,11 @@ API routes:
 7. Keep `WEB_AUDIT_DEV_RESET_TOKENS=false`.
 8. Choose storage mode:
    - single-node JSON: persistent private `data/`, one writer, tested backups.
-   - multi-instance/serverless: implement Postgres/Drizzle first.
+   - Postgres: set `WEB_AUDIT_STORE=postgres`, configure `DATABASE_URL`, run migrations, verify backups/restores.
 9. Choose worker mode:
    - single-node JSON: avoid concurrent writer processes.
-   - durable production: implement a shared queue and dedicated worker.
+   - Postgres: coordinate cron/worker execution so due audits are not double-run.
+   - high scale: implement a shared queue and dedicated worker.
 10. Add real password-reset email delivery before relying on password reset in production.
 11. Configure logs, uptime checks, cron alerts, audit failure alerts, and backup monitoring.
 12. Restrict outbound egress to public HTTP/HTTPS where possible.

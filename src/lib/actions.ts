@@ -169,11 +169,7 @@ export async function deleteWebsiteAction(formData: FormData) {
 
 export async function markNotificationsReadAction() {
   const user = await requireUser();
-  await storeAdapter.updateStore((data) => {
-    for (const notification of data.notifications) {
-      if (notification.userId === user.id) notification.read = true;
-    }
-  });
+  await storeAdapter.markNotificationsRead(user.id);
   revalidatePath("/notifications");
   redirect("/notifications");
 }

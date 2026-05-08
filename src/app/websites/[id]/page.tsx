@@ -11,7 +11,7 @@ import {
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { storeAdapter } from "@/lib/persistence";
-import { findingsFor, latestAuditFor } from "@/lib/store";
+import { latestAuditFor } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -27,7 +27,7 @@ export default async function WebsiteDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  const { data, websites, audits } = await storeAdapter.getUserDashboard(
+  const { websites, audits } = await storeAdapter.getUserDashboard(
     user.id,
   );
   const website = websites.find((item) => item.id === id);

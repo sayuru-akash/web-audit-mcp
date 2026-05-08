@@ -1,4 +1,17 @@
-import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+} from "drizzle-orm";
 import { getDatabase } from "@/db/client";
 import {
   auditRuns,
@@ -101,19 +114,55 @@ function mapShareLink(row: typeof shareLinks.$inferSelect) {
   };
 }
 
-function notImplemented(method: string): never {
-  throw new Error(
-    `Postgres store adapter method not implemented yet: ${method}.`,
-  );
-}
-
 export const postgresStoreAdapter: StoreAdapter = {
   provider: "postgres",
   async readStore() {
-    notImplemented("readStore");
+    const db = getDatabase();
+    const [
+      userRows,
+      sessionRows,
+      websiteRows,
+      auditRows,
+      findingRows,
+      metricRows,
+      notificationRows,
+      shareRows,
+      resetRows,
+      rateLimitRows,
+    ] = await Promise.all([
+      db.select().from(users),
+      db.select().from(sessions),
+      db.select().from(websites),
+      db.select().from(auditRuns),
+      db.select().from(findings),
+      db.select().from(metrics),
+      db.select().from(notifications),
+      db.select().from(shareLinks),
+      db.select().from(passwordResetTokens),
+      db.select().from(rateLimits),
+    ]);
+    return {
+      version: 1,
+      users: userRows.map(mapUser),
+      sessions: sessionRows.map(mapSession),
+      websites: websiteRows.map(mapWebsite),
+      audits: auditRows.map(mapAuditRun),
+      findings: findingRows.map(mapFinding),
+      metrics: metricRows.map(mapMetric),
+      notifications: notificationRows.map(mapNotification),
+      shareLinks: shareRows.map(mapShareLink),
+      passwordResetTokens: resetRows.map(mapPasswordResetToken),
+      rateLimits: rateLimitRows.map((row) => ({
+        key: row.key,
+        count: row.count,
+        resetAt: row.resetAt.toISOString(),
+      })),
+    };
   },
   async updateStore() {
-    notImplemented("updateStore");
+    throw new Error(
+      "Generic updateStore is not supported by the Postgres adapter. Use StoreAdapter methods instead.",
+    );
   },
   async getUserByEmail(email) {
     const db = getDatabase();
@@ -177,6 +226,10 @@ export const postgresStoreAdapter: StoreAdapter = {
     if (!row) throw new Error("Account not found.");
     return mapUser(row);
   },
+  async deleteUser(userId) {
+    const db = getDatabase();
+    await db.delete(users).where(eq(users.id, userId));
+  },
   async findUserBySession(tokenHash) {
     const db = getDatabase();
     const [row] = await db
@@ -235,7 +288,7 @@ export const postgresStoreAdapter: StoreAdapter = {
       .where(
         and(
           eq(passwordResetTokens.userId, input.userId),
-          sql`${passwordResetTokens.usedAt} IS NULL`,
+          isNull(passwordResetTokens.usedAt),
         ),
       );
     const [row] = await db
@@ -257,7 +310,7 @@ export const postgresStoreAdapter: StoreAdapter = {
       .where(
         and(
           eq(passwordResetTokens.tokenHash, tokenHash),
-          sql`${passwordResetTokens.usedAt} IS NULL`,
+          isNull(passwordResetTokens.usedAt),
           gt(passwordResetTokens.expiresAt, new Date()),
         ),
       )
@@ -334,7 +387,7 @@ export const postgresStoreAdapter: StoreAdapter = {
           and(
             eq(shareLinks.auditRunId, auditId),
             eq(shareLinks.enabled, true),
-            sql`${shareLinks.revokedAt} IS NULL`,
+            isNull(shareLinks.revokedAt),
           ),
         )
         .limit(1)
@@ -423,8 +476,17 @@ export const postgresStoreAdapter: StoreAdapter = {
     if (!row) throw new Error("Website not found.");
     return mapWebsite(row);
   },
-  async deleteWebsite() {
-    notImplemented("deleteWebsite");
+  async deleteWebsite(websiteId, userId) {
+    const db = getDatabase();
+    const where = userId
+      ? and(eq(websites.id, websiteId), eq(websites.userId, userId))
+      : eq(websites.id, websiteId);
+    const [website] = await db.select().from(websites).where(where).limit(1);
+    if (!website) throw new Error("Website not found.");
+    await db
+      .delete(notifications)
+      .where(eq(notifications.websiteId, websiteId));
+    await db.delete(websites).where(eq(websites.id, websiteId));
   },
   async getAuditById(auditId, userId) {
     const db = getDatabase();
@@ -461,10 +523,10 @@ export const postgresStoreAdapter: StoreAdapter = {
     const conditions = [
       eq(auditRuns.websiteId, websiteId),
       eq(auditRuns.status, "completed"),
-      sql`${auditRuns.overallScore} IS NOT NULL`,
+      isNotNull(auditRuns.overallScore),
     ];
     if (excludeAuditId) {
-      conditions.push(sql`${auditRuns.id} <> ${excludeAuditId}` as never);
+      conditions.push(ne(auditRuns.id, excludeAuditId) as never);
     }
     const [row] = await db
       .select()
@@ -528,8 +590,27 @@ export const postgresStoreAdapter: StoreAdapter = {
     if (!row) throw new Error("Audit not found.");
     return mapAuditRun(row);
   },
-  async replaceAuditResults() {
-    notImplemented("replaceAuditResults");
+  async replaceAuditResults(auditId, nextFindings, nextMetrics) {
+    const db = getDatabase();
+    await db.delete(findings).where(eq(findings.auditRunId, auditId));
+    await db.delete(metrics).where(eq(metrics.auditRunId, auditId));
+    if (nextFindings.length > 0) {
+      await db.insert(findings).values(
+        nextFindings.map((finding) => ({
+          ...finding,
+          technicalDetails: finding.technicalDetails ?? null,
+        })),
+      );
+    }
+    if (nextMetrics.length > 0) {
+      await db.insert(metrics).values(
+        nextMetrics.map((metric) => ({
+          ...metric,
+          value: String(metric.value),
+          unit: metric.unit ?? null,
+        })),
+      );
+    }
   },
   async createNotification(notification) {
     const db = getDatabase();
@@ -544,8 +625,70 @@ export const postgresStoreAdapter: StoreAdapter = {
       .returning();
     return mapNotification(row);
   },
-  async listDueScheduledWebsites() {
-    notImplemented("listDueScheduledWebsites");
+  async markNotificationsRead(userId) {
+    const db = getDatabase();
+    await db
+      .update(notifications)
+      .set({ read: true })
+      .where(eq(notifications.userId, userId));
+  },
+  async listQueuedAudits(limit) {
+    const db = getDatabase();
+    const rows = await db
+      .select()
+      .from(auditRuns)
+      .where(eq(auditRuns.status, "queued"))
+      .orderBy(asc(auditRuns.createdAt))
+      .limit(Math.max(1, Math.min(10, limit)));
+    return rows.map(mapAuditRun);
+  },
+  async recoverStaleAudits(cutoffMs) {
+    const db = getDatabase();
+    const cutoff = new Date(Date.now() - cutoffMs);
+    const completedAt = new Date();
+    const rows = await db
+      .update(auditRuns)
+      .set({
+        status: "failed",
+        failureReason:
+          "Audit was marked stale after the worker did not finish in time.",
+        completedAt,
+        updatedAt: completedAt,
+      })
+      .where(
+        and(
+          inArray(auditRuns.status, ["queued", "running"]),
+          or(
+            lt(auditRuns.startedAt, cutoff),
+            and(isNull(auditRuns.startedAt), lt(auditRuns.updatedAt, cutoff)),
+            and(
+              isNull(auditRuns.startedAt),
+              isNull(auditRuns.updatedAt),
+              lt(auditRuns.createdAt, cutoff),
+            ),
+          ),
+        ),
+      )
+      .returning({ id: auditRuns.id });
+    return rows.length;
+  },
+  async listDueScheduledWebsites(currentTime = Date.now()) {
+    const db = getDatabase();
+    const now = new Date(currentTime);
+    const rows = await db
+      .select()
+      .from(websites)
+      .where(
+        and(
+          eq(websites.scheduleEnabled, true),
+          ne(websites.scheduleFrequency, "manual"),
+          or(
+            isNull(websites.nextScheduledRunAt),
+            lte(websites.nextScheduledRunAt, now),
+          ),
+        ),
+      );
+    return rows.map(mapWebsite);
   },
   async getActiveShareLink(auditId) {
     const db = getDatabase();
@@ -556,14 +699,46 @@ export const postgresStoreAdapter: StoreAdapter = {
         and(
           eq(shareLinks.auditRunId, auditId),
           eq(shareLinks.enabled, true),
-          sql`${shareLinks.revokedAt} IS NULL`,
+          isNull(shareLinks.revokedAt),
         ),
       )
       .limit(1);
     return row ? mapShareLink(row) : undefined;
   },
-  async createOrUpdateShareLink() {
-    notImplemented("createOrUpdateShareLink");
+  async createOrUpdateShareLink(auditId, enabled, create, revokedAt) {
+    const db = getDatabase();
+    const [existing] = await db
+      .select()
+      .from(shareLinks)
+      .where(
+        and(
+          eq(shareLinks.auditRunId, auditId),
+          isNull(shareLinks.revokedAt),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      const link = create();
+      const [row] = await db
+        .insert(shareLinks)
+        .values({
+          ...link,
+          expiresAt: link.expiresAt ? new Date(link.expiresAt) : null,
+          revokedAt: link.revokedAt ? new Date(link.revokedAt) : null,
+          createdAt: new Date(link.createdAt),
+        })
+        .returning();
+      return mapShareLink(row);
+    }
+    const [row] = await db
+      .update(shareLinks)
+      .set({
+        enabled,
+        revokedAt: revokedAt ? new Date(revokedAt) : null,
+      })
+      .where(eq(shareLinks.id, existing.id))
+      .returning();
+    return mapShareLink(row);
   },
   async getSharedAuditReport(token) {
     const db = getDatabase();
@@ -575,9 +750,9 @@ export const postgresStoreAdapter: StoreAdapter = {
         and(
           eq(shareLinks.token, token),
           eq(shareLinks.enabled, true),
-          sql`${shareLinks.revokedAt} IS NULL`,
+          isNull(shareLinks.revokedAt),
           or(
-            sql`${shareLinks.expiresAt} IS NULL`,
+            isNull(shareLinks.expiresAt),
             gt(shareLinks.expiresAt, now),
           ),
         ),
@@ -591,7 +766,7 @@ export const postgresStoreAdapter: StoreAdapter = {
     const now = new Date();
     const resetAt = new Date(now.getTime() + windowMs);
 
-    await db.delete(rateLimits).where(sql`${rateLimits.resetAt} <= ${now}`);
+    await db.delete(rateLimits).where(lte(rateLimits.resetAt, now));
 
     const [current] = await db
       .select()
@@ -618,13 +793,16 @@ export const postgresStoreAdapter: StoreAdapter = {
     const db = getDatabase();
     const now = new Date();
     await Promise.all([
-      db.delete(sessions).where(sql`${sessions.expiresAt} <= ${now}`),
+      db.delete(sessions).where(lte(sessions.expiresAt, now)),
       db
         .delete(passwordResetTokens)
         .where(
-          sql`${passwordResetTokens.usedAt} IS NULL AND ${passwordResetTokens.expiresAt} <= ${now}`,
+          and(
+            isNull(passwordResetTokens.usedAt),
+            lte(passwordResetTokens.expiresAt, now),
+          ),
         ),
-      db.delete(rateLimits).where(sql`${rateLimits.resetAt} <= ${now}`),
+      db.delete(rateLimits).where(lte(rateLimits.resetAt, now)),
     ]);
   },
   async getStoreHealth() {

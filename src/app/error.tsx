@@ -1,6 +1,7 @@
 "use client";
 
 import { RotateCcw } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
@@ -8,7 +9,7 @@ export default function ErrorPage({ error, reset }: { error: Error; reset: () =>
     <main className="state-page">
       <div className="state-card">
         <div className="actions" style={{ justifyContent: "space-between" }}>
-          <span className="brand-mark">!</span>
+          <BrandMark />
           <ThemeToggle />
         </div>
         <h1>Something went wrong</h1>

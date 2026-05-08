@@ -138,8 +138,8 @@ The smoke script starts the same `npm run mcp` server through the official MCP S
 | --- | --- |
 | `validate_audit_url` | Read-only validation |
 | `run_page_audit` | Read-only network audit of the submitted public page |
-| `save_website_and_audit` | Writes website, audit, findings, metrics, notifications to local store |
-| `get_audit_report` | Read-only local report lookup |
+| `save_website_and_audit` | Writes website, audit, findings, metrics, notifications to the active store adapter |
+| `get_audit_report` | Read-only report lookup from the active store adapter |
 
 ## References Checked
 
@@ -148,4 +148,3 @@ The smoke script starts the same `npm run mcp` server through the official MCP S
 - OpenAI MCP server guide for ChatGPT/API integrations: `https://developers.openai.com/api/docs/mcp`
 - Claude Code MCP docs: `https://code.claude.com/docs/en/mcp`
 - MCP local server connection guide: `https://modelcontextprotocol.io/docs/develop/connect-local-servers`
-

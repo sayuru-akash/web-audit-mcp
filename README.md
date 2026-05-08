@@ -1,8 +1,14 @@
 # Web Audit
 
-Web Audit is a production-minded website audit and monitoring product with a local MCP stdio server for agent workflows. It audits one submitted page, adds selected website health checks, stores reports locally, and presents findings in a calm report-first UI.
+Web Audit is a production-minded website audit and monitoring product with a local MCP stdio server for agent workflows. It audits one submitted page, adds selected website health checks, stores reports in JSON or Postgres, and presents findings in a calm report-first UI.
 
 The v1 product boundary is intentional: this is a page audit with selected website health checks. It is not a full-site crawler, penetration testing tool, keyword rank tracker, or deep vulnerability scanner.
+
+![Web Audit home screen](public/images/readme/home.png)
+
+![Postgres-backed dashboard](public/images/readme/dashboard.png)
+
+![Shared audit report](public/images/readme/shared-report.png)
 
 ## Contents
 
@@ -64,7 +70,7 @@ Implemented product surfaces:
 - Polished loading, not-found, and error states.
 - Scheduled audit endpoint protected by `CRON_SECRET` in production and rate limited.
 - Local JSON persistence for self-hosted/single-node operation.
-- Postgres/Drizzle schema and initial SQL migration are present for the production migration path, but the current runtime store remains JSON until the service adapter is switched.
+- Postgres/Drizzle runtime persistence with SQL migrations, shared rate limits, and a smoke test for auth, website, audit, findings, metrics, notifications, scheduling, and share links.
 - MCP stdio server exposing validation, audit, persistence, and report retrieval tools.
 
 ## Architecture
@@ -85,7 +91,7 @@ flowchart LR
   AuditEngine --> Checks["HTML, headers, robots, sitemap, limited same-origin link checks"]
   Checks --> Scoring["Scoring and findings"]
 
-  Actions --> Store["Local JSON store: data/webaudit.json"]
+  Actions --> Store["Store adapter: JSON or Postgres"]
   AuditService --> Store
   MCP --> Store
   Scoring --> Store
@@ -98,8 +104,9 @@ Key modules:
 - `src/lib/audit-engine.ts` runs the page audit and produces metrics/findings.
 - `src/lib/audit-service.ts` manages website records, audit runs, schedules, share links, and notifications.
 - `src/lib/url.ts` normalizes URLs and blocks local/private/internal network targets before audit work starts.
-- `src/lib/store.ts` persists local runtime data to `data/webaudit.json`.
-- `src/db/schema.ts` and `migrations/0001_initial.sql` define the production Postgres schema path.
+- `src/lib/persistence/*` contains the JSON and Postgres store adapters.
+- `src/lib/store.ts` keeps JSON file helpers and shared ID/time helpers.
+- `src/db/schema.ts` and `migrations/*.sql` define the Postgres runtime schema.
 - `src/mcp/server.ts` exposes the local MCP stdio tools.
 - `scripts/worker-once.ts` processes queued audit runs from the same service layer.
 
@@ -111,7 +118,7 @@ sequenceDiagram
   participant A as App / MCP tool
   participant S as Audit service
   participant E as Audit engine
-  participant D as JSON store
+  participant D as Store adapter
 
   U->>A: Submit URL or run saved website audit
   A->>S: Create or locate audit run
@@ -201,7 +208,7 @@ Example tool workflow:
 3. Call `save_website_and_audit` when the report should appear in the web UI and local store.
 4. Call `get_audit_report` later with the persisted audit ID.
 
-MCP persistence uses the same `data/webaudit.json` store as the web app. `save_website_and_audit` creates an internal `agent@webaudit.local` user if it does not already exist.
+MCP persistence uses the same active store adapter as the web app. `save_website_and_audit` creates an internal `agent@webaudit.local` user if it does not already exist.
 
 ## Agent Connections
 
@@ -276,9 +283,10 @@ npm run mcp
 | `CRON_SECRET` | Required outside development | `replace-for-production` | `POST /api/cron/run-scheduled` | Callers must send `Authorization: Bearer <CRON_SECRET>` when configured. Use a strong random value. |
 | `ADMIN_EMAILS` | Required outside development for admin access | `admin@example.com` | `/admin`, `/api/admin/health` | Comma-separated email allowlist. |
 | `WEB_AUDIT_DEV_RESET_TOKENS` | No | `false` | Forgot-password flow | Development-only reset-token display. Production blocks this even if it is accidentally set to `true`. |
-| `DATABASE_URL` | Optional, not consumed by current runtime | `postgresql://...` | Future Postgres/Drizzle adapter | Schema and SQL migration exist, but keep unset until the runtime adapter is enabled. See [docs/production.md](docs/production.md). |
+| `WEB_AUDIT_STORE` | No | `json` | Store adapter | Use `json` for `data/webaudit.json` or `postgres` for Postgres runtime persistence. |
+| `DATABASE_URL` | Required for Postgres mode | `postgresql://localhost:5432/web_audit_mcp` | Postgres adapter and migrations | Required when `WEB_AUDIT_STORE=postgres`. Keep unset in JSON mode. |
 
-This repo does not currently require external database, queue, object storage, email, analytics, or payment provider environment variables. Add those only when the matching infrastructure is actually implemented.
+This repo does not require queue, object storage, email, analytics, or payment provider environment variables. Add those only when the matching infrastructure is actually implemented.
 
 ## Commands
 
@@ -295,6 +303,8 @@ This repo does not currently require external database, queue, object storage, e
 | `npm run mcp:smoke -- https://example.com --run-audit` | Start the MCP server through an SDK client, verify tool registration, validate a URL, and optionally run an audit. |
 | `npm run audit:url -- https://example.com` | Run a one-off CLI page audit and print JSON. |
 | `npm run worker:once -- 5` | Process up to five queued audit runs. |
+| `npm run db:migrate` | Apply Postgres migrations when `DATABASE_URL` is configured. |
+| `npm run db:smoke -- https://www.wikipedia.org/` | Run a Postgres-backed service smoke test. Add `--keep` to retain the sample audit. |
 | `npm run db:schema:check` | Verify the committed Drizzle schema table set. |
 
 ## Application Routes
@@ -336,13 +346,14 @@ Route notes:
 
 ## Data Storage
 
-Runtime data is stored in:
+Web Audit has two runtime storage modes:
 
-```text
-data/webaudit.json
-```
+| Mode | Enablement | Best for |
+| --- | --- | --- |
+| JSON | Default, or `WEB_AUDIT_STORE=json` | Local development, demos, and controlled single-node self-hosting. |
+| Postgres | `WEB_AUDIT_STORE=postgres` plus `DATABASE_URL` | Shared runtime persistence, hosted database backups, and multi-instance app deployments. |
 
-The store contains:
+Both stores contain:
 
 - Users and hashed passwords.
 - Session token hashes.
@@ -355,6 +366,12 @@ The store contains:
 - Password reset token hashes.
 - Rate limit counters.
 
+JSON stores runtime data in:
+
+```text
+data/webaudit.json
+```
+
 This local JSON store is useful for development, demos, and single-node self-hosted operation. It is not a multi-instance production database and should not be shared by multiple concurrent application instances.
 
 Local JSON limits:
@@ -365,13 +382,22 @@ Local JSON limits:
 - Backups are file-level only unless you add a database export process.
 - Treat the JSON file as operational state containing private account and audit data.
 
-Optional Postgres/Drizzle path:
+Postgres runtime path:
 
-- `@neondatabase/serverless` and `drizzle-orm` are installed as the intended production database direction.
-- `src/db/schema.ts` defines users, sessions, websites, audits, findings, metrics, notifications, share links, and password reset tokens.
-- `migrations/0001_initial.sql` contains the initial PostgreSQL schema.
-- Do not set `DATABASE_URL` and assume production persistence is active until the store layer is migrated from `src/lib/store.ts` to a real Postgres adapter.
-- A safe migration should add the runtime adapter, shared rate-limit storage, backup/restore drills, and parity tests for website/audit/share/auth flows.
+- `postgres` and `drizzle-orm` power the runtime adapter.
+- `src/db/schema.ts` defines users, sessions, websites, audits, findings, metrics, notifications, share links, password reset tokens, and rate limits.
+- `migrations/0001_initial.sql`, `0002_add_needs_review_finding_status.sql`, and `0003_add_rate_limits.sql` are applied by `npm run db:migrate`.
+- `src/lib/persistence/postgres-store.ts` implements the active service adapter used by auth, routes, cron, admin, and MCP.
+- `npm run db:smoke -- https://www.wikipedia.org/` verifies a Postgres-backed create-user, add-website, real audit, findings/metrics persistence, notification, schedule, and share-link flow.
+
+Local Postgres example:
+
+```bash
+createdb web_audit_mcp
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:migrate
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:smoke -- https://www.wikipedia.org/
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run dev
+```
 
 ## Metrics
 
@@ -397,18 +423,18 @@ See [docs/audit-metrics.md](docs/audit-metrics.md) for the full score and metric
 
 ## Production Posture
 
-Single-node deployment can run the web app and MCP server from the same checkout, using the local JSON store. For that mode:
+Single-node deployment can run the web app and MCP server from the same checkout, using JSON or Postgres. For either mode:
 
 - Set `NEXT_PUBLIC_APP_URL` to the real deployed origin.
 - Set a strong `CRON_SECRET`.
-- Ensure the process can read/write `data/webaudit.json`.
-- Back up the `data/` directory.
-- Run only one writer process against the JSON store.
+- Configure `WEB_AUDIT_STORE`.
+- For JSON, ensure the process can read/write `data/webaudit.json`, back up `data/`, and run only one writer process.
+- For Postgres, set `DATABASE_URL`, run `npm run db:migrate`, use managed backups, and verify restore into staging.
 - Use `npm run worker:once -- 5` or `POST /api/cron/run-scheduled` from a scheduler to process queued/scheduled audits.
 - Keep outbound network egress restricted to public HTTP/HTTPS targets where possible.
 - Monitor failures from `/api/health`, application logs, and scheduled audit responses.
 
-For serverless or multi-instance deployment, do not rely on `data/webaudit.json`. Move persistence and job execution to production infrastructure first.
+For serverless or multi-instance deployment, do not rely on `data/webaudit.json`. Use Postgres for shared runtime persistence and keep job execution coordinated so scheduled/queued audits are not double-run.
 
 Production security controls that must stay enabled:
 
@@ -422,7 +448,8 @@ Production security controls that must stay enabled:
 - Admin allowlisting via `ADMIN_EMAILS`.
 - Cron authorization via `CRON_SECRET`.
 - HTTP-only session cookies with secure cookies in production.
-- Serialized writes while JSON storage remains in use.
+- Serialized writes while JSON storage is in use.
+- Shared Postgres rate-limit storage when Postgres mode is enabled.
 
 ## Production Deployment Checklist
 
@@ -434,8 +461,8 @@ Before a real production launch:
 4. Set a strong random `CRON_SECRET` and configure the scheduler to call `POST /api/cron/run-scheduled` with `Authorization: Bearer <secret>`.
 5. Set `ADMIN_EMAILS` to the production operator allowlist and verify `/admin` plus `/api/admin/health` deny non-admin users.
 6. Keep `WEB_AUDIT_DEV_RESET_TOKENS=false`.
-7. Decide storage mode. For single-node JSON, mount persistent private storage for `data/`, run one writer, and back it up. For multi-instance/serverless, implement the Postgres/Drizzle migration first.
-8. Decide worker mode. For JSON storage, avoid multiple concurrent writers. For durable production, move queued/scheduled work to a shared queue and keep URL safety validation inside the worker.
+7. Decide storage mode. For single-node JSON, mount persistent private storage for `data/`, run one writer, and back it up. For Postgres, set `WEB_AUDIT_STORE=postgres`, configure `DATABASE_URL`, run migrations, and verify backups/restores.
+8. Decide worker mode. For JSON storage, avoid multiple concurrent writers. For Postgres deployments, coordinate cron/worker execution so due audits are not double-run; for high scale, move queued/scheduled work to a durable queue and keep URL safety validation inside the worker.
 9. Add real password-reset email delivery before relying on forgot-password in production.
 10. Add structured logs, uptime checks, cron failure alerts, backup monitoring, and restore testing.
 11. Restrict outbound egress where possible to public HTTP/HTTPS destinations and block metadata/private networks at the platform/firewall layer too.
@@ -461,6 +488,8 @@ npm run build
 npm run audit:url -- https://example.com
 npm run mcp:smoke -- https://example.com --run-audit
 npm run worker:once -- 5
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:migrate
+WEB_AUDIT_STORE=postgres DATABASE_URL=postgresql://localhost:5432/web_audit_mcp npm run db:smoke -- https://www.wikipedia.org/
 ```
 
 For MCP changes, also connect with an MCP client or MCP Inspector and exercise:
@@ -484,16 +513,16 @@ Current v1 limitations:
 - Password reset tokens are generated and stored hashed, but a real email provider must be added before production reset delivery.
 - Notifications are in-app only; no external email/SMS/push provider is configured.
 - Scheduled audits run through an HTTP cron endpoint and local queued-job worker path; no external durable queue exists yet.
-- Data is stored in a local JSON file; it is not suitable for horizontally scaled production.
+- JSON mode is not suitable for horizontally scaled production; use Postgres mode for shared runtime persistence.
 - PDF export is server-generated and functional, but not a full white-label report system.
 
 ## Future Production Migrations
 
-Recommended migrations before serious multi-user production:
+Recommended migrations before serious high-scale production:
 
 ```mermaid
 flowchart TD
-  Json["Local JSON store"] --> Postgres["PostgreSQL with migrations and backups"]
+  Store["JSON or Postgres runtime store"] --> HardenedDb["Managed Postgres backups, restore drills, and retention"]
   Inline["Inline audit execution"] --> Queue["Durable queue"]
   Queue --> Worker["Dedicated audit worker"]
   Worker --> Browser["Optional browser/Lighthouse worker pool"]
@@ -505,8 +534,8 @@ flowchart TD
 
 Production migration checklist:
 
-- Replace `data/webaudit.json` with PostgreSQL.
-- Add schema migrations and repeatable seed/test fixtures.
+- Use Postgres mode for any multi-instance deployment.
+- Keep schema migrations and repeatable smoke/fixture tests current.
 - Move audit work to a durable queue/worker so web requests do not own long-running jobs.
 - Keep URL validation and private-network blocking inside the worker, not only in the web route.
 - Preserve explicit validation around every redirect hop/final URL before fetching expanded targets.
@@ -514,12 +543,11 @@ Production migration checklist:
 - Add email alerts only after a real delivery provider is configured.
 - Add structured logging, audit failure dashboards, and alerting.
 - Add retention, export, and deletion policies for user data.
-- Add rate limits backed by shared storage.
 - Add backups and restore drills for the production database.
 
 ## Further Documentation
 
-- [docs/production.md](docs/production.md) covers deployment posture, JSON limits, optional Postgres/Drizzle migration expectations, security controls, and the exact launch checklist.
+- [docs/production.md](docs/production.md) covers deployment posture, JSON limits, Postgres runtime setup, security controls, and the exact launch checklist.
 - [docs/mcp.md](docs/mcp.md) covers MCP setup, tool behavior, persistence boundaries, and safety expectations.
 - [docs/agent-connections.md](docs/agent-connections.md) covers Codex, Claude, Claude Desktop, generic MCP client, and ChatGPT/API connection paths.
 - [docs/audit-metrics.md](docs/audit-metrics.md) covers score outputs and stored metric keys.

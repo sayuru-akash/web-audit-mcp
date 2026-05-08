@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { dueScheduledWebsites, processQueuedAudits, recoverStaleAudits, runAuditForWebsite } from "@/lib/audit-service";
+import { storeAdapter } from "@/lib/persistence";
 import { getCronSecret, isProduction } from "@/lib/runtime-config";
-import { checkRateLimit, pruneExpiredSecurityRecords } from "@/lib/store";
 
 export async function POST(request: Request) {
   let secret: string;
@@ -16,9 +16,9 @@ export async function POST(request: Request) {
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
-  const allowed = await checkRateLimit("cron:run-scheduled", 30, 60 * 60 * 1000);
+  const allowed = await storeAdapter.checkRateLimit("cron:run-scheduled", 30, 60 * 60 * 1000);
   if (!allowed) return NextResponse.json({ error: "Cron rate limit reached." }, { status: 429 });
-  await pruneExpiredSecurityRecords();
+  await storeAdapter.pruneExpiredSecurityRecords();
   const recoveredStale = await recoverStaleAudits();
   const due = await dueScheduledWebsites();
   const results = [];

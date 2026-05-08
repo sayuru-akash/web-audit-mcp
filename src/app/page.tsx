@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Activity, FileText, Globe2, Lock, ShieldCheck, TimerReset } from "lucide-react";
 import { AddWebsiteForm } from "@/components/forms";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { currentUser } from "@/lib/auth";
 import { appBaseUrl, appDescription, appName } from "@/lib/seo";
@@ -27,9 +28,7 @@ export default async function HomePage() {
       <main className="hero">
         <div className="hero-nav">
           <Link className="brand" href="/">
-            <span className="brand-mark">
-              <ShieldCheck size={18} />
-            </span>
+            <BrandMark />
             <span>Web Audit</span>
           </Link>
           <div className="actions">
