@@ -4,7 +4,8 @@ import { AppShell } from "@/components/app-shell";
 import { AddWebsiteForm, RunAuditButton } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { getUserDashboard, latestAuditFor } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { latestAuditFor } from "@/lib/store";
 import { noIndexMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -14,9 +15,13 @@ export const metadata: Metadata = {
 
 export default async function WebsitesPage() {
   const user = await requireUser();
-  const { websites, audits } = await getUserDashboard(user.id);
+  const { websites, audits } = await storeAdapter.getUserDashboard(user.id);
   return (
-    <AppShell user={user} title="Websites" subtitle="Manage targets, schedules, and latest audit state.">
+    <AppShell
+      user={user}
+      title="Websites"
+      subtitle="Manage targets, schedules, and latest audit state."
+    >
       <div className="grid cols-2">
         <div className="card">
           <table className="table">
@@ -39,8 +44,18 @@ export default async function WebsitesPage() {
                         <div className="muted">{website.normalizedUrl}</div>
                       </Link>
                     </td>
-                    <td>{latest ? <ScoreText score={latest.overallScore} /> : "No audit"}</td>
-                    <td>{website.scheduleEnabled ? website.scheduleFrequency : "Manual"}</td>
+                    <td>
+                      {latest ? (
+                        <ScoreText score={latest.overallScore} />
+                      ) : (
+                        "No audit"
+                      )}
+                    </td>
+                    <td>
+                      {website.scheduleEnabled
+                        ? website.scheduleFrequency
+                        : "Manual"}
+                    </td>
                     <td>
                       <RunAuditButton websiteId={website.id} />
                     </td>

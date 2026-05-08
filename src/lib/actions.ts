@@ -27,7 +27,8 @@ import {
   updateSchedule,
   updateWebsiteDetails,
 } from "@/lib/audit-service";
-import { checkRateLimit, id, nowIso, updateStore } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { id, nowIso } from "@/lib/store";
 import type { ScheduleFrequency } from "@/lib/types";
 
 function value(formData: FormData, key: string) {
@@ -40,25 +41,27 @@ export async function signUpAction(formData: FormData) {
     email: value(formData, "email").toLowerCase(),
     password: value(formData, "password"),
   });
-  const allowed = await checkRateLimit(`auth-signup:${parsed.email}`, 5, 60 * 60 * 1000);
-  if (!allowed) throw new Error("Too many sign-up attempts. Please try again later.");
-  const user = await updateStore((data) => {
-    if (data.users.some((item) => item.email === parsed.email)) throw new Error("Use the login form for this email.");
-    const ts = nowIso();
-    const created = {
-      id: id(),
-      email: parsed.email,
-      displayName: parsed.displayName,
-      passwordHash: hashPassword(parsed.password),
-      notifyOnAuditCompleted: true,
-      notifyOnAuditFailed: true,
-      notifyOnCriticalIssue: true,
-      notifyOnScoreDrop: true,
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    data.users.push(created);
-    return created;
+  const allowed = await storeAdapter.checkRateLimit(
+    `auth-signup:${parsed.email}`,
+    5,
+    60 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many sign-up attempts. Please try again later.");
+  const existing = await storeAdapter.getUserByEmail(parsed.email);
+  if (existing) throw new Error("Use the login form for this email.");
+  const ts = nowIso();
+  const user = await storeAdapter.createUser({
+    id: id(),
+    email: parsed.email,
+    displayName: parsed.displayName,
+    passwordHash: hashPassword(parsed.password),
+    notifyOnAuditCompleted: true,
+    notifyOnAuditFailed: true,
+    notifyOnCriticalIssue: true,
+    notifyOnScoreDrop: true,
+    createdAt: ts,
+    updatedAt: ts,
   });
   await setSessionCookie(await createSession(user.id));
   redirect("/dashboard");
@@ -69,9 +72,14 @@ export async function loginAction(formData: FormData) {
     email: value(formData, "email").toLowerCase(),
     password: value(formData, "password"),
   });
-  const allowed = await checkRateLimit(`auth-login:${parsed.email}`, 10, 15 * 60 * 1000);
-  if (!allowed) throw new Error("Too many login attempts. Please try again later.");
-  const user = await updateStore((data) => data.users.find((item) => item.email === parsed.email));
+  const allowed = await storeAdapter.checkRateLimit(
+    `auth-login:${parsed.email}`,
+    10,
+    15 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many login attempts. Please try again later.");
+  const user = await storeAdapter.getUserByEmail(parsed.email);
   if (!user || !verifyPassword(parsed.password, user.passwordHash)) {
     throw new Error("Invalid email or password.");
   }
@@ -80,11 +88,20 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function requestPasswordResetAction(formData: FormData) {
-  const parsed = resetRequestSchema.parse({ email: value(formData, "email").toLowerCase() });
-  const allowed = await checkRateLimit(`password-reset:${parsed.email}`, 3, 60 * 60 * 1000);
-  if (!allowed) throw new Error("Too many reset attempts. Please try again later.");
+  const parsed = resetRequestSchema.parse({
+    email: value(formData, "email").toLowerCase(),
+  });
+  const allowed = await storeAdapter.checkRateLimit(
+    `password-reset:${parsed.email}`,
+    3,
+    60 * 60 * 1000,
+  );
+  if (!allowed)
+    throw new Error("Too many reset attempts. Please try again later.");
   const devToken = await createPasswordResetToken(parsed.email);
-  const target = devToken ? `/forgot-password?sent=1&devToken=${encodeURIComponent(devToken)}` : "/forgot-password?sent=1";
+  const target = devToken
+    ? `/forgot-password?sent=1&devToken=${encodeURIComponent(devToken)}`
+    : "/forgot-password?sent=1";
   redirect(target);
 }
 
@@ -104,7 +121,11 @@ export async function logoutAction() {
 
 export async function addWebsiteAction(formData: FormData) {
   const user = await requireUser();
-  const website = await addWebsiteForUser(user.id, value(formData, "url"), value(formData, "displayName"));
+  const website = await addWebsiteForUser(
+    user.id,
+    value(formData, "url"),
+    value(formData, "displayName"),
+  );
   revalidatePath("/websites");
   redirect(`/websites/${website.id}`);
 }
@@ -130,7 +151,11 @@ export async function scheduleAction(formData: FormData) {
 export async function updateWebsiteAction(formData: FormData) {
   const user = await requireUser();
   const websiteId = value(formData, "websiteId");
-  await updateWebsiteDetails(user.id, websiteId, value(formData, "displayName"));
+  await updateWebsiteDetails(
+    user.id,
+    websiteId,
+    value(formData, "displayName"),
+  );
   revalidatePath(`/websites/${websiteId}`);
   redirect(`/websites/${websiteId}`);
 }
@@ -144,7 +169,7 @@ export async function deleteWebsiteAction(formData: FormData) {
 
 export async function markNotificationsReadAction() {
   const user = await requireUser();
-  await updateStore((data) => {
+  await storeAdapter.updateStore((data) => {
     for (const notification of data.notifications) {
       if (notification.userId === user.id) notification.read = true;
     }
@@ -165,12 +190,12 @@ export async function deleteAccountAction(formData: FormData) {
 
 export async function updateProfileAction(formData: FormData) {
   const user = await requireUser();
-  const parsed = profileSchema.parse({ displayName: value(formData, "displayName") });
-  await updateStore((data) => {
-    const current = data.users.find((item) => item.id === user.id);
-    if (!current) throw new Error("Account not found.");
-    current.displayName = parsed.displayName;
-    current.updatedAt = nowIso();
+  const parsed = profileSchema.parse({
+    displayName: value(formData, "displayName"),
+  });
+  await storeAdapter.updateUser(user.id, {
+    displayName: parsed.displayName,
+    updatedAt: nowIso(),
   });
   revalidatePath("/settings");
   redirect("/settings");
@@ -182,29 +207,30 @@ export async function changePasswordAction(formData: FormData) {
     currentPassword: value(formData, "currentPassword"),
     password: value(formData, "password"),
   });
-  await updateStore((data) => {
-    const current = data.users.find((item) => item.id === user.id);
-    if (!current || !verifyPassword(parsed.currentPassword, current.passwordHash)) {
-      throw new Error("Current password is incorrect.");
-    }
-    current.passwordHash = hashPassword(parsed.password);
-    current.updatedAt = nowIso();
-    data.sessions = data.sessions.filter((session) => session.userId !== user.id);
+  const account = await storeAdapter.getUserByEmail(user.email);
+  if (
+    !account ||
+    !verifyPassword(parsed.currentPassword, account.passwordHash)
+  ) {
+    throw new Error("Current password is incorrect.");
+  }
+  await storeAdapter.updateUser(user.id, {
+    passwordHash: hashPassword(parsed.password),
+    updatedAt: nowIso(),
   });
+  await storeAdapter.deleteSessionsForUser(user.id);
   await clearSessionCookie();
   redirect("/login");
 }
 
 export async function updateNotificationPreferencesAction(formData: FormData) {
   const user = await requireUser();
-  await updateStore((data) => {
-    const current = data.users.find((item) => item.id === user.id);
-    if (!current) throw new Error("Account not found.");
-    current.notifyOnAuditCompleted = formData.get("notifyOnAuditCompleted") === "on";
-    current.notifyOnAuditFailed = formData.get("notifyOnAuditFailed") === "on";
-    current.notifyOnCriticalIssue = formData.get("notifyOnCriticalIssue") === "on";
-    current.notifyOnScoreDrop = formData.get("notifyOnScoreDrop") === "on";
-    current.updatedAt = nowIso();
+  await storeAdapter.updateUser(user.id, {
+    notifyOnAuditCompleted: formData.get("notifyOnAuditCompleted") === "on",
+    notifyOnAuditFailed: formData.get("notifyOnAuditFailed") === "on",
+    notifyOnCriticalIssue: formData.get("notifyOnCriticalIssue") === "on",
+    notifyOnScoreDrop: formData.get("notifyOnScoreDrop") === "on",
+    updatedAt: nowIso(),
   });
   revalidatePath("/settings");
   redirect("/settings");

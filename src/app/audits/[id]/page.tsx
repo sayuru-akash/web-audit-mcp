@@ -9,8 +9,8 @@ import { ReportActions } from "@/components/report-actions";
 import { ScoreRing, ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
 import { absoluteUrlFromOrigin, requestOrigin, timeAgo } from "@/lib/format";
+import { storeAdapter } from "@/lib/persistence";
 import { noIndexMetadata } from "@/lib/seo";
-import { activeShareFor, findingsFor, getUserDashboard, metricsFor } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "Audit Report",
@@ -27,27 +27,42 @@ export default async function AuditReportPage({
   const { id } = await params;
   const query = await searchParams;
   const user = await requireUser();
-  const { data, websites, audits } = await getUserDashboard(user.id);
-  const audit = audits.find((item) => item.id === id);
+  const { website, audit, findings, metrics, share } =
+    await storeAdapter.getAuditReport(id, user.id);
   if (!audit) notFound();
-  const website = websites.find((item) => item.id === audit.websiteId);
   if (!website) notFound();
-  const findings = findingsFor(audit.id, data.findings);
-  const metrics = metricsFor(audit.id, data.metrics);
-  const share = activeShareFor(audit.id, data.shareLinks);
   const origin = requestOrigin(await headers());
-  const shareUrl = share ? absoluteUrlFromOrigin(`/share/${share.token}`, origin) : undefined;
-  const confirmedFindings = findings.filter((finding) => finding.status === "failed");
-  const passedFindings = findings.filter((finding) => finding.status === "passed");
+  const shareUrl = share
+    ? absoluteUrlFromOrigin(`/share/${share.token}`, origin)
+    : undefined;
+  const confirmedFindings = findings.filter(
+    (finding) => finding.status === "failed",
+  );
+  const passedFindings = findings.filter(
+    (finding) => finding.status === "passed",
+  );
   const topIssues = confirmedFindings.slice(0, 8);
-  const manualReviewFindings = findings.filter((finding) => finding.status === "needs_review");
+  const manualReviewFindings = findings.filter(
+    (finding) => finding.status === "needs_review",
+  );
   return (
-    <AppShell user={user} title="Audit report" subtitle={`${website.displayName} - ${audit.finalUrl ?? audit.requestedUrl}`}>
+    <AppShell
+      user={user}
+      title="Audit report"
+      subtitle={`${website.displayName} - ${audit.finalUrl ?? audit.requestedUrl}`}
+    >
       <div className="report-toolbar">
         {audit.status === "completed" ? (
-          <ReportActions auditId={audit.id} websiteDomain={website.domain} shareUrl={shareUrl} shareCreated={query.share === "created"} />
+          <ReportActions
+            auditId={audit.id}
+            websiteDomain={website.domain}
+            shareUrl={shareUrl}
+            shareCreated={query.share === "created"}
+          />
         ) : (
-          <span className="inline-status">Report actions unlock after completion.</span>
+          <span className="inline-status">
+            Report actions unlock after completion.
+          </span>
         )}
         {share ? (
           <Link className="button" href={`/share/${share.token}`}>
@@ -67,19 +82,29 @@ export default async function AuditReportPage({
           <ScoreRing score={audit.overallScore} />
           <div>
             <h2>{audit.overallScore ? "Overall health" : "Audit status"}</h2>
-            <p className="muted">{audit.status === "failed" ? audit.failureReason : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}`}</p>
+            <p className="muted">
+              {audit.status === "failed"
+                ? audit.failureReason
+                : `Completed ${timeAgo(audit.completedAt ?? audit.createdAt)}`}
+            </p>
           </div>
         </div>
         <div className="card score-breakdown">
           <h2>Category scores</h2>
           <div className="grid">
             {audit.categoryScores
-              ? Object.entries(audit.categoryScores).map(([category, score]) => (
-                  <div className="actions" style={{ justifyContent: "space-between" }} key={category}>
-                    <span>{category}</span>
-                    <ScoreText score={score} />
-                  </div>
-                ))
+              ? Object.entries(audit.categoryScores).map(
+                  ([category, score]) => (
+                    <div
+                      className="actions"
+                      style={{ justifyContent: "space-between" }}
+                      key={category}
+                    >
+                      <span>{category}</span>
+                      <ScoreText score={score} />
+                    </div>
+                  ),
+                )
               : null}
           </div>
         </div>
@@ -101,7 +126,11 @@ export default async function AuditReportPage({
           </div>
           <div className="mini-meta">
             <span>{audit.profile}</span>
-            <span>{audit.durationMs ? `${Math.round(audit.durationMs / 1000)}s` : "-s"}</span>
+            <span>
+              {audit.durationMs
+                ? `${Math.round(audit.durationMs / 1000)}s`
+                : "-s"}
+            </span>
             <span>{audit.status}</span>
           </div>
         </div>
@@ -115,8 +144,12 @@ export default async function AuditReportPage({
               topIssues.slice(0, 6).map((finding) => (
                 <article className="issue-row" key={finding.id}>
                   <div className="actions">
-                    <span className={`badge ${finding.severity}`}>{finding.severity}</span>
-                    <span className={`badge ${finding.status}`}>{finding.status.replace("_", " ")}</span>
+                    <span className={`badge ${finding.severity}`}>
+                      {finding.severity}
+                    </span>
+                    <span className={`badge ${finding.status}`}>
+                      {finding.status.replace("_", " ")}
+                    </span>
                   </div>
                   <div>
                     <h3>{finding.title}</h3>
@@ -126,7 +159,9 @@ export default async function AuditReportPage({
                 </article>
               ))
             ) : (
-              <p className="muted">No confirmed failed findings in this audit.</p>
+              <p className="muted">
+                No confirmed failed findings in this audit.
+              </p>
             )}
           </div>
         </div>
@@ -153,14 +188,20 @@ export default async function AuditReportPage({
           <div className="card">
             <h2>Needs manual verification</h2>
             <p className="muted">
-              These items were detected by automation but may be platform-managed or conditional. They are visible in the report without reducing the score.
+              These items were detected by automation but may be
+              platform-managed or conditional. They are visible in the report
+              without reducing the score.
             </p>
             <div className="grid">
               {manualReviewFindings.map((finding) => (
                 <article className="issue" key={finding.id}>
                   <div className="actions">
-                    <span className={`badge ${finding.severity}`}>{finding.severity}</span>
-                    <span className={`badge ${finding.status}`}>manual review</span>
+                    <span className={`badge ${finding.severity}`}>
+                      {finding.severity}
+                    </span>
+                    <span className={`badge ${finding.status}`}>
+                      manual review
+                    </span>
                   </div>
                   <h3>{finding.title}</h3>
                   <p>{finding.recommendation}</p>
@@ -179,7 +220,9 @@ export default async function AuditReportPage({
             {findings.map((finding) => (
               <tr key={finding.id}>
                 <td>
-                  <span className={`badge ${finding.severity}`}>{finding.severity}</span>
+                  <span className={`badge ${finding.severity}`}>
+                    {finding.severity}
+                  </span>
                 </td>
                 <td>
                   <strong>{finding.title}</strong>
@@ -187,7 +230,9 @@ export default async function AuditReportPage({
                 </td>
                 <td>{finding.category}</td>
                 <td>
-                  <span className={`badge ${finding.status}`}>{finding.status.replace("_", " ")}</span>
+                  <span className={`badge ${finding.status}`}>
+                    {finding.status.replace("_", " ")}
+                  </span>
                 </td>
                 <td>
                   <FindingEvidenceButton finding={finding} />

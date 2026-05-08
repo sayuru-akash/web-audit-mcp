@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { FindingEvidenceButton } from "@/components/finding-evidence";
 import { ScoreRing } from "@/components/score";
+import { storeAdapter } from "@/lib/persistence";
 import { noIndexMetadata } from "@/lib/seo";
-import { activeShareFor, findingsFor, metricsFor, readStore } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "Shared Audit Report",
@@ -11,27 +11,31 @@ export const metadata: Metadata = {
   ...noIndexMetadata,
 };
 
-export default async function SharedReportPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function SharedReportPage({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
   const { token } = await params;
-  const data = await readStore();
-  const tokenMatch = data.shareLinks.find((item) => item.token === token);
-  const link = tokenMatch ? activeShareFor(tokenMatch.auditRunId, data.shareLinks) : undefined;
-  if (!link) notFound();
-  const audit = data.audits.find((item) => item.id === link.auditRunId && item.status === "completed");
+  const { website, audit, findings, metrics } =
+    await storeAdapter.getSharedAuditReport(token);
   if (!audit) notFound();
-  const website = data.websites.find((item) => item.id === audit.websiteId);
   if (!website) notFound();
-  const findings = findingsFor(audit.id, data.findings);
-  const metrics = metricsFor(audit.id, data.metrics);
-  const failedFindings = findings.filter((finding) => finding.status === "failed");
-  const reviewFindings = findings.filter((finding) => finding.status === "needs_review");
+  const failedFindings = findings.filter(
+    (finding) => finding.status === "failed",
+  );
+  const reviewFindings = findings.filter(
+    (finding) => finding.status === "needs_review",
+  );
   return (
     <main className="content" style={{ margin: "0 auto" }}>
       <div className="card">
         <div className="actions" style={{ justifyContent: "space-between" }}>
           <div>
             <h1 className="page-title">Web Audit Report</h1>
-            <p className="page-subtitle">{website.displayName} - {audit.finalUrl}</p>
+            <p className="page-subtitle">
+              {website.displayName} - {audit.finalUrl}
+            </p>
           </div>
           <ScoreRing score={audit.overallScore} />
         </div>
@@ -44,14 +48,18 @@ export default async function SharedReportPage({ params }: { params: Promise<{ t
             {failedFindings.length > 0 ? (
               failedFindings.slice(0, 12).map((finding) => (
                 <article className="issue" key={finding.id}>
-                  <span className={`badge ${finding.severity}`}>{finding.severity}</span>
+                  <span className={`badge ${finding.severity}`}>
+                    {finding.severity}
+                  </span>
                   <h3>{finding.title}</h3>
                   <p>{finding.recommendation}</p>
                   <FindingEvidenceButton finding={finding} />
                 </article>
               ))
             ) : (
-              <p className="muted">No confirmed failed findings in this shared report.</p>
+              <p className="muted">
+                No confirmed failed findings in this shared report.
+              </p>
             )}
           </div>
           {reviewFindings.length > 0 ? (
@@ -74,11 +82,17 @@ export default async function SharedReportPage({ params }: { params: Promise<{ t
         <div className="card">
           <h2>Metrics</h2>
           <div className="grid">
-            <div className="actions" style={{ justifyContent: "space-between" }}>
+            <div
+              className="actions"
+              style={{ justifyContent: "space-between" }}
+            >
               <span>Confirmed failures</span>
               <strong>{failedFindings.length}</strong>
             </div>
-            <div className="actions" style={{ justifyContent: "space-between" }}>
+            <div
+              className="actions"
+              style={{ justifyContent: "space-between" }}
+            >
               <span>Manual review</span>
               <strong>{reviewFindings.length}</strong>
             </div>
@@ -89,7 +103,10 @@ export default async function SharedReportPage({ params }: { params: Promise<{ t
               {metrics.map((item) => (
                 <tr key={item.id}>
                   <td>{item.label}</td>
-                  <td>{item.value}{item.unit ? ` ${item.unit}` : ""}</td>
+                  <td>
+                    {item.value}
+                    {item.unit ? ` ${item.unit}` : ""}
+                  </td>
                 </tr>
               ))}
             </tbody>

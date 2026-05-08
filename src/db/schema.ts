@@ -10,11 +10,33 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-export const auditStatusEnum = pgEnum("audit_status", ["queued", "running", "completed", "failed", "cancelled"]);
+export const auditStatusEnum = pgEnum("audit_status", [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
 export const auditProfileEnum = pgEnum("audit_profile", ["desktop", "mobile"]);
-export const scheduleFrequencyEnum = pgEnum("schedule_frequency", ["manual", "daily", "weekly", "monthly"]);
-export const severityEnum = pgEnum("severity", ["critical", "high", "medium", "low", "info"]);
-export const findingStatusEnum = pgEnum("finding_status", ["passed", "failed", "needs_review", "skipped"]);
+export const scheduleFrequencyEnum = pgEnum("schedule_frequency", [
+  "manual",
+  "daily",
+  "weekly",
+  "monthly",
+]);
+export const severityEnum = pgEnum("severity", [
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "info",
+]);
+export const findingStatusEnum = pgEnum("finding_status", [
+  "passed",
+  "failed",
+  "needs_review",
+  "skipped",
+]);
 export const auditCategoryEnum = pgEnum("audit_category", [
   "performance",
   "seo",
@@ -32,8 +54,12 @@ export const notificationTypeEnum = pgEnum("notification_type", [
 ]);
 
 const timestamps = {
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 };
 
 export const users = pgTable(
@@ -44,10 +70,18 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     displayName: text("display_name").notNull(),
     avatarUrl: text("avatar_url"),
-    defaultAuditFrequency: scheduleFrequencyEnum("default_audit_frequency").default("manual"),
-    notifyOnAuditCompleted: boolean("notify_on_audit_completed").notNull().default(true),
-    notifyOnAuditFailed: boolean("notify_on_audit_failed").notNull().default(true),
-    notifyOnCriticalIssue: boolean("notify_on_critical_issue").notNull().default(true),
+    defaultAuditFrequency: scheduleFrequencyEnum(
+      "default_audit_frequency",
+    ).default("manual"),
+    notifyOnAuditCompleted: boolean("notify_on_audit_completed")
+      .notNull()
+      .default(true),
+    notifyOnAuditFailed: boolean("notify_on_audit_failed")
+      .notNull()
+      .default(true),
+    notifyOnCriticalIssue: boolean("notify_on_critical_issue")
+      .notNull()
+      .default(true),
     notifyOnScoreDrop: boolean("notify_on_score_drop").notNull().default(true),
     ...timestamps,
   },
@@ -63,9 +97,14 @@ export const sessions = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (table) => [uniqueIndex("sessions_token_hash_unique").on(table.tokenHash), index("sessions_user_idx").on(table.userId)],
+  (table) => [
+    uniqueIndex("sessions_token_hash_unique").on(table.tokenHash),
+    index("sessions_user_idx").on(table.userId),
+  ],
 );
 
 export const websites = pgTable(
@@ -80,18 +119,30 @@ export const websites = pgTable(
     normalizedUrl: text("normalized_url").notNull(),
     domain: text("domain").notNull(),
     faviconUrl: text("favicon_url"),
-    scheduleFrequency: scheduleFrequencyEnum("schedule_frequency").notNull().default("manual"),
+    scheduleFrequency: scheduleFrequencyEnum("schedule_frequency")
+      .notNull()
+      .default("manual"),
     scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
-    lastScheduledRunAt: timestamp("last_scheduled_run_at", { withTimezone: true }),
-    nextScheduledRunAt: timestamp("next_scheduled_run_at", { withTimezone: true }),
+    lastScheduledRunAt: timestamp("last_scheduled_run_at", {
+      withTimezone: true,
+    }),
+    nextScheduledRunAt: timestamp("next_scheduled_run_at", {
+      withTimezone: true,
+    }),
     alertThreshold: integer("alert_threshold").notNull().default(10),
     lastAuditId: text("last_audit_id"),
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("websites_user_url_unique").on(table.userId, table.normalizedUrl),
+    uniqueIndex("websites_user_url_unique").on(
+      table.userId,
+      table.normalizedUrl,
+    ),
     index("websites_user_idx").on(table.userId),
-    index("websites_schedule_idx").on(table.scheduleEnabled, table.nextScheduledRunAt),
+    index("websites_schedule_idx").on(
+      table.scheduleEnabled,
+      table.nextScheduledRunAt,
+    ),
   ],
 );
 
@@ -142,7 +193,10 @@ export const findings = pgTable(
     technicalDetails: text("technical_details"),
     sortPriority: integer("sort_priority").notNull(),
   },
-  (table) => [index("findings_audit_idx").on(table.auditRunId), index("findings_severity_idx").on(table.severity)],
+  (table) => [
+    index("findings_audit_idx").on(table.auditRunId),
+    index("findings_severity_idx").on(table.severity),
+  ],
 );
 
 export const metrics = pgTable(
@@ -168,15 +222,23 @@ export const notifications = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    websiteId: text("website_id").references(() => websites.id, { onDelete: "set null" }),
-    auditRunId: text("audit_run_id").references(() => auditRuns.id, { onDelete: "set null" }),
+    websiteId: text("website_id").references(() => websites.id, {
+      onDelete: "set null",
+    }),
+    auditRunId: text("audit_run_id").references(() => auditRuns.id, {
+      onDelete: "set null",
+    }),
     type: notificationTypeEnum("type").notNull(),
     title: text("title").notNull(),
     message: text("message").notNull(),
     read: boolean("read").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (table) => [index("notifications_user_idx").on(table.userId, table.createdAt)],
+  (table) => [
+    index("notifications_user_idx").on(table.userId, table.createdAt),
+  ],
 );
 
 export const shareLinks = pgTable(
@@ -190,9 +252,14 @@ export const shareLinks = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (table) => [uniqueIndex("share_links_token_unique").on(table.token), index("share_links_audit_idx").on(table.auditRunId)],
+  (table) => [
+    uniqueIndex("share_links_token_unique").on(table.token),
+    index("share_links_audit_idx").on(table.auditRunId),
+  ],
 );
 
 export const passwordResetTokens = pgTable(
@@ -205,7 +272,22 @@ export const passwordResetTokens = pgTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (table) => [uniqueIndex("password_reset_token_hash_unique").on(table.tokenHash), index("password_reset_user_idx").on(table.userId)],
+  (table) => [
+    uniqueIndex("password_reset_token_hash_unique").on(table.tokenHash),
+    index("password_reset_user_idx").on(table.userId),
+  ],
+);
+
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull().default(1),
+    resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("rate_limits_reset_idx").on(table.resetAt)],
 );

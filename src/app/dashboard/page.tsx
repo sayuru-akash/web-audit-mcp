@@ -1,11 +1,18 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Activity, AlertTriangle, ArrowUpRight, BarChart3, Globe2 } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowUpRight,
+  BarChart3,
+  Globe2,
+} from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { AddWebsiteForm, RunAuditButton } from "@/components/forms";
 import { ScoreText } from "@/components/score";
 import { requireUser } from "@/lib/auth";
-import { getUserDashboard, latestAuditFor } from "@/lib/store";
+import { storeAdapter } from "@/lib/persistence";
+import { latestAuditFor } from "@/lib/store";
 import { timeAgo } from "@/lib/format";
 import { noIndexMetadata } from "@/lib/seo";
 
@@ -16,14 +23,25 @@ export const metadata: Metadata = {
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const { websites, audits, notifications } = await getUserDashboard(user.id);
-  const completed = audits.filter((audit) => audit.status === "completed" && audit.overallScore !== undefined);
+  const { websites, audits, notifications } =
+    await storeAdapter.getUserDashboard(user.id);
+  const completed = audits.filter(
+    (audit) => audit.status === "completed" && audit.overallScore !== undefined,
+  );
   const average = completed.length
-    ? Math.round(completed.reduce((sum, audit) => sum + (audit.overallScore ?? 0), 0) / completed.length)
+    ? Math.round(
+        completed.reduce((sum, audit) => sum + (audit.overallScore ?? 0), 0) /
+          completed.length,
+      )
     : undefined;
-  const critical = notifications.filter((notification) => notification.type === "critical_issue" && !notification.read).length;
+  const critical = notifications.filter(
+    (notification) =>
+      notification.type === "critical_issue" && !notification.read,
+  ).length;
   const latestCompleted = [...completed].sort(
-    (a, b) => Date.parse(b.completedAt ?? b.createdAt) - Date.parse(a.completedAt ?? a.createdAt),
+    (a, b) =>
+      Date.parse(b.completedAt ?? b.createdAt) -
+      Date.parse(a.completedAt ?? a.createdAt),
   )[0];
   const websiteSummaries = websites
     .map((website) => ({ website, latest: latestAuditFor(website, audits) }))
@@ -32,7 +50,9 @@ export default async function DashboardPage() {
       const bScore = b.latest?.overallScore ?? -1;
       return aScore - bScore;
     });
-  const recentAudits = [...audits].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 5);
+  const recentAudits = [...audits]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, 5);
   return (
     <AppShell user={user} title="Dashboard" subtitle="Live overview">
       <div className="dashboard-shell">
@@ -40,11 +60,19 @@ export default async function DashboardPage() {
           <section className="dashboard-hero">
             <div>
               <span className="eyebrow">Workspace health</span>
-              <h2>{average !== undefined ? `${average}/100` : "No score yet"}</h2>
-              <p>{latestCompleted ? `Last audit ${timeAgo(latestCompleted.completedAt ?? latestCompleted.createdAt)}` : "Add a site to begin."}</p>
+              <h2>
+                {average !== undefined ? `${average}/100` : "No score yet"}
+              </h2>
+              <p>
+                {latestCompleted
+                  ? `Last audit ${timeAgo(latestCompleted.completedAt ?? latestCompleted.createdAt)}`
+                  : "Add a site to begin."}
+              </p>
             </div>
             <div className="hero-actions">
-              <span className="status-pill">{critical ? `${critical} critical` : "No critical alerts"}</span>
+              <span className="status-pill">
+                {critical ? `${critical} critical` : "No critical alerts"}
+              </span>
               <Link className="button primary" href="/websites">
                 Websites <ArrowUpRight size={16} />
               </Link>
@@ -90,7 +118,10 @@ export default async function DashboardPage() {
           </div>
           <div className="dashboard-panels">
             <div className="card panel-card">
-              <div className="actions" style={{ justifyContent: "space-between" }}>
+              <div
+                className="actions"
+                style={{ justifyContent: "space-between" }}
+              >
                 <h2>Needs attention</h2>
                 <Link className="button" href="/websites">
                   View all
@@ -103,15 +134,30 @@ export default async function DashboardPage() {
                       <strong>{website.displayName}</strong>
                       <span>{website.domain}</span>
                     </Link>
-                    <div>{latest ? <ScoreText score={latest.overallScore} /> : <RunAuditButton websiteId={website.id} />}</div>
-                    <span className="muted">{latest ? timeAgo(latest.completedAt ?? latest.createdAt) : "Not run"}</span>
+                    <div>
+                      {latest ? (
+                        <ScoreText score={latest.overallScore} />
+                      ) : (
+                        <RunAuditButton websiteId={website.id} />
+                      )}
+                    </div>
+                    <span className="muted">
+                      {latest
+                        ? timeAgo(latest.completedAt ?? latest.createdAt)
+                        : "Not run"}
+                    </span>
                   </article>
                 ))}
-                {websites.length === 0 ? <p className="empty-state">No websites yet.</p> : null}
+                {websites.length === 0 ? (
+                  <p className="empty-state">No websites yet.</p>
+                ) : null}
               </div>
             </div>
             <div className="card panel-card">
-              <div className="actions" style={{ justifyContent: "space-between" }}>
+              <div
+                className="actions"
+                style={{ justifyContent: "space-between" }}
+              >
                 <h2>Recent audits</h2>
                 <Link className="button" href="/audits">
                   View all
@@ -119,24 +165,41 @@ export default async function DashboardPage() {
               </div>
               <div className="recent-list">
                 {recentAudits.map((audit) => {
-                  const website = websites.find((item) => item.id === audit.websiteId);
+                  const website = websites.find(
+                    (item) => item.id === audit.websiteId,
+                  );
                   return (
-                    <Link className="recent-row" href={`/audits/${audit.id}`} key={audit.id}>
+                    <Link
+                      className="recent-row"
+                      href={`/audits/${audit.id}`}
+                      key={audit.id}
+                    >
                       <span>
-                        <strong>{website?.displayName ?? audit.requestedUrl}</strong>
-                        <small>{timeAgo(audit.completedAt ?? audit.createdAt)}</small>
+                        <strong>
+                          {website?.displayName ?? audit.requestedUrl}
+                        </strong>
+                        <small>
+                          {timeAgo(audit.completedAt ?? audit.createdAt)}
+                        </small>
                       </span>
-                      <span className={`badge ${audit.status}`}>{audit.status}</span>
+                      <span className={`badge ${audit.status}`}>
+                        {audit.status}
+                      </span>
                       <ScoreText score={audit.overallScore} />
                     </Link>
                   );
                 })}
-                {recentAudits.length === 0 ? <p className="empty-state">No audits yet.</p> : null}
+                {recentAudits.length === 0 ? (
+                  <p className="empty-state">No audits yet.</p>
+                ) : null}
               </div>
             </div>
           </div>
         </div>
-        <AddWebsiteForm className="form card quick-add-card" heading="Add website" />
+        <AddWebsiteForm
+          className="form card quick-add-card"
+          heading="Add website"
+        />
       </div>
     </AppShell>
   );
